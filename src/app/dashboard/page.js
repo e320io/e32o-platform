@@ -1,6 +1,743 @@
-'use client';
-// TODO: Módulo Dashboard + Pepe auto-asignación
-// Este módulo se construye en el Chat 1 del proyecto e.32o
-export default function Dashboard() {
-  return <div style={{ padding: 40, textAlign: 'center', color: '#888' }}>Dashboard — pendiente de construir</div>;
+import { useState, useEffect, useMemo } from "react";
+
+// ── Supabase lightweight client ──
+const SUPABASE_URL = "https://fyiukqelspqdvdulczrs.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ5aXVrcWVsc3BxZHZkdWxjenJzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4NzUwMDAsImV4cCI6MjA4OTQ1MTAwMH0.HsZdGoLGCIbKcv3ytWTyjYrWeQ5yRJsp7O1Cj9lWO3g";
+
+const sb = (table) => ({
+  async select(columns = "*", filters = {}) {
+    let url = `${SUPABASE_URL}/rest/v1/${table}?select=${columns}`;
+    Object.entries(filters).forEach(([k, v]) => { url += `&${k}=${v}`; });
+    const res = await fetch(url, { headers: { apikey: SUPABASE_ANON, Authorization: `Bearer ${SUPABASE_ANON}` } });
+    return res.ok ? res.json() : [];
+  }
+});
+
+// ── Demo data (used when Supabase tables are empty or unreachable) ──
+const DEMO_CLIENTS = [
+  { id: "c1", name: "Cire", color: "#B8F03E" },
+  { id: "c2", name: "Brillo Mío Valle", color: "#3EF0C8" },
+  { id: "c3", name: "Brillo Mío Santa Fe", color: "#3EB8F0" },
+  { id: "c4", name: "Beauty Design SJ", color: "#F0A03E" },
+  { id: "c5", name: "Beauty Design Barbería", color: "#F03E7A" },
+  { id: "c6", name: "Sandy Arcos", color: "#C83EF0" },
+  { id: "c7", name: "Profeta Mariana", color: "#F0E03E" },
+  { id: "c8", name: "Apóstol Víctor", color: "#3EF06A" },
+  { id: "c9", name: "Diveland", color: "#F07A3E" },
+  { id: "c10", name: "Iglesia Ágil", color: "#7A7A7A" },
+];
+
+const DEMO_PLANS = [
+  { client_id: "c1", reels: 12, carousels: 4, ads: 1, total_pieces: 17 },
+  { client_id: "c2", reels: 12, fast_reels: 4, carousels: 4, ads: 1, total_pieces: 21 },
+  { client_id: "c3", reels: 12, fast_reels: 4, carousels: 4, ads: 1, total_pieces: 21 },
+  { client_id: "c4", videos: 6, images: 3, ads: 1, total_pieces: 10 },
+  { client_id: "c5", videos: 6, images: 3, ads: 1, total_pieces: 10 },
+  { client_id: "c6", episodes: 4, reels_ep: 24, reels_indiv: 6, total_pieces: 34 },
+  { client_id: "c7", episodes: 4, reels_grab: 8, reels_predica: 4, carousels: 4, total_pieces: 20 },
+  { client_id: "c8", clips: 8, total_pieces: 8 },
+  { client_id: "c9", total_pieces: 4 },
+  { client_id: "c10", total_pieces: 0 },
+];
+
+const STAGES = ["research", "scripting", "approval", "recording", "editing", "client_review", "published"];
+const STAGE_LABELS = {
+  research: "Research", scripting: "Guión", approval: "Aprobación",
+  recording: "Grabación", editing: "Edición", client_review: "Rev. Cliente", published: "Publicado"
+};
+
+function generateDemoPieces() {
+  const pieces = [];
+  const now = new Date();
+  let id = 0;
+  DEMO_PLANS.forEach((plan) => {
+    const total = plan.total_pieces || 0;
+    for (let i = 0; i < total; i++) {
+      id++;
+      const stageIdx = Math.random() < 0.25 ? 6 : Math.floor(Math.random() * 6);
+      const deadline = new Date(now);
+      deadline.setDate(deadline.getDate() + Math.floor(Math.random() * 14) - 3);
+      const createdAt = new Date(now);
+      createdAt.setDate(createdAt.getDate() - Math.floor(Math.random() * 20));
+      const isLate = stageIdx < 6 && deadline < now;
+      pieces.push({
+        id: `p${id}`,
+        client_id: plan.client_id,
+        title: `Pieza ${i + 1}`,
+        status: STAGES[stageIdx],
+        deadline: deadline.toISOString().slice(0, 10),
+        created_at: createdAt.toISOString(),
+        is_late: isLate,
+        assigned_to: ["fer_ayala", "natha_barragan", "jose_camacho", "alhena_taboada", "mariana_yudico"][Math.floor(Math.random() * 5)],
+      });
+    }
+  });
+  return pieces;
 }
+
+const DEMO_TEAM = [
+  { user_id: "fer_ayala", display_name: "Fer Ayala", role: "founder", avatar: "FA" },
+  { user_id: "yaz_antonio", display_name: "Yaz Antonio", role: "cofounder", avatar: "YA" },
+  { user_id: "natha_barragan", display_name: "Natha Barragán", role: "assistant", avatar: "NB" },
+  { user_id: "jose_camacho", display_name: "José Camacho", role: "editor", avatar: "JC" },
+  { user_id: "alhena_taboada", display_name: "Alhena Taboada", role: "filmmaker", avatar: "AT" },
+  { user_id: "mariana_yudico", display_name: "Mariana Yudico", role: "filmmaker", avatar: "MY" },
+];
+
+// ── Pepe AI recommendations engine ──
+function generatePepeInsights(pieces, clients) {
+  const insights = [];
+  const now = new Date();
+  const latePieces = pieces.filter(p => p.is_late && p.status !== "published");
+  const totalActive = pieces.filter(p => p.status !== "published").length;
+  const totalDone = pieces.filter(p => p.status === "published").length;
+  const totalAll = pieces.length;
+  
+  if (latePieces.length > 0) {
+    const byClient = {};
+    latePieces.forEach(p => {
+      const cl = clients.find(c => c.id === p.client_id);
+      const name = cl?.name || p.client_id;
+      byClient[name] = (byClient[name] || 0) + 1;
+    });
+    const worst = Object.entries(byClient).sort((a, b) => b[1] - a[1])[0];
+    insights.push({
+      type: "alert",
+      text: `Hay ${latePieces.length} piezas atrasadas. ${worst[0]} tiene ${worst[1]} — recomiendo reasignar recursos de edición ahí esta semana.`
+    });
+  }
+
+  const stageCount = {};
+  pieces.filter(p => p.status !== "published").forEach(p => { stageCount[p.status] = (stageCount[p.status] || 0) + 1; });
+  const bottleneck = Object.entries(stageCount).sort((a, b) => b[1] - a[1])[0];
+  if (bottleneck && bottleneck[1] > 5) {
+    insights.push({
+      type: "warning",
+      text: `Cuello de botella en ${STAGE_LABELS[bottleneck[0]]}: ${bottleneck[1]} piezas acumuladas. Sugiero priorizar esta etapa hoy.`
+    });
+  }
+
+  const pct = totalAll > 0 ? Math.round((totalDone / totalAll) * 100) : 0;
+  const dayOfMonth = now.getDate();
+  const expectedPct = Math.round((dayOfMonth / 30) * 100);
+  if (pct < expectedPct - 15) {
+    insights.push({
+      type: "warning",
+      text: `Vamos al ${pct}% del mes pero deberíamos estar al ~${expectedPct}%. Hay que acelerar entregas esta semana.`
+    });
+  } else if (pct >= expectedPct) {
+    insights.push({
+      type: "success",
+      text: `Ritmo saludable: ${pct}% completado con ${expectedPct}% del mes transcurrido. Seguimos así.`
+    });
+  }
+
+  if (insights.length === 0) {
+    insights.push({ type: "success", text: "Todo fluye bien. Sin alertas críticas hoy." });
+  }
+
+  return insights;
+}
+
+// ── Icons (inline SVG) ──
+const Icon = ({ name, size = 18, color = "currentColor" }) => {
+  const icons = {
+    pieces: <><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></>,
+    check: <><path d="M20 6L9 17l-5-5"/></>,
+    alert: <><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>,
+    speed: <><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></>,
+    calendar: <><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></>,
+    brain: <><path d="M12 2a7 7 0 017 7c0 3-2 5.5-4 7l-3 4-3-4c-2-1.5-4-4-4-7a7 7 0 017-7z"/><circle cx="12" cy="9" r="2"/></>,
+    team: <><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></>,
+    settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></>,
+  };
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {icons[name]}
+    </svg>
+  );
+};
+
+// ── Main Dashboard ──
+export default function Dashboard() {
+  const [pieces, setPieces] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [team, setTeam] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [pepeOpen, setPepeOpen] = useState(true);
+  const [hoveredClient, setHoveredClient] = useState(null);
+  const [now] = useState(new Date());
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const [dbClients, dbPieces, dbTeam] = await Promise.all([
+          sb("clients").select(),
+          sb("content_pieces").select(),
+          sb("team_users").select(),
+        ]);
+        if (dbClients.length > 0) {
+          setClients(dbClients);
+          setPieces(dbPieces);
+          setTeam(dbTeam);
+        } else {
+          setClients(DEMO_CLIENTS);
+          setPieces(generateDemoPieces());
+          setTeam(DEMO_TEAM);
+        }
+      } catch {
+        setClients(DEMO_CLIENTS);
+        setPieces(generateDemoPieces());
+        setTeam(DEMO_TEAM);
+      }
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  // ── KPIs ──
+  const kpis = useMemo(() => {
+    const total = pieces.length;
+    const done = pieces.filter(p => p.status === "published").length;
+    const late = pieces.filter(p => p.is_late && p.status !== "published").length;
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    const completedPieces = pieces.filter(p => p.status === "published" && p.created_at);
+    let avgDays = 0;
+    if (completedPieces.length > 0) {
+      const totalDays = completedPieces.reduce((sum, p) => {
+        const created = new Date(p.created_at);
+        const deadline = new Date(p.deadline);
+        return sum + Math.max(1, Math.round((deadline - created) / 86400000));
+      }, 0);
+      avgDays = Math.round(totalDays / completedPieces.length);
+    }
+    return { total, done, late, pct, avgDays };
+  }, [pieces]);
+
+  // ── Client progress ──
+  const clientProgress = useMemo(() => {
+    return clients.filter(c => c.id !== "c10").map(c => {
+      const cp = pieces.filter(p => p.client_id === c.id);
+      const total = cp.length;
+      const done = cp.filter(p => p.status === "published").length;
+      const late = cp.filter(p => p.is_late && p.status !== "published").length;
+      const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+      return { ...c, total, done, late, pct };
+    }).sort((a, b) => b.total - a.total);
+  }, [clients, pieces]);
+
+  // ── Team load ──
+  const teamLoad = useMemo(() => {
+    return team.filter(t => t.role !== "cofounder").map(t => {
+      const active = pieces.filter(p => p.assigned_to === t.user_id && p.status !== "published").length;
+      const done = pieces.filter(p => p.assigned_to === t.user_id && p.status === "published").length;
+      const total = active + done;
+      const eff = total > 0 ? Math.round((done / total) * 100) : 0;
+      return { ...t, active, done, total, eff };
+    }).sort((a, b) => b.active - a.active);
+  }, [team, pieces]);
+
+  // ── Upcoming deadlines ──
+  const deadlines = useMemo(() => {
+    const in7 = new Date(now);
+    in7.setDate(in7.getDate() + 7);
+    return pieces
+      .filter(p => p.status !== "published" && p.deadline)
+      .filter(p => {
+        const d = new Date(p.deadline);
+        return d >= now && d <= in7;
+      })
+      .sort((a, b) => new Date(a.deadline) - new Date(b.deadline))
+      .slice(0, 12);
+  }, [pieces, now]);
+
+  // ── Pepe insights ──
+  const pepeInsights = useMemo(() => generatePepeInsights(pieces, clients), [pieces, clients]);
+
+  const monthName = now.toLocaleDateString("es-MX", { month: "long", year: "numeric" });
+
+  if (loading) {
+    return (
+      <div style={styles.loadingWrap}>
+        <div style={styles.loadingPulse} />
+        <p style={styles.loadingText}>Cargando dashboard...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={styles.page}>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
+
+      {/* Header */}
+      <header style={styles.header}>
+        <div style={styles.headerLeft}>
+          <span style={styles.logo}>e.32o</span>
+          <span style={styles.headerSep}>|</span>
+          <span style={styles.headerTitle}>Dashboard ejecutivo</span>
+        </div>
+        <div style={styles.headerRight}>
+          <span style={styles.headerDate}>{monthName}</span>
+          <div style={styles.avatarSmall}>FA</div>
+        </div>
+      </header>
+
+      <main style={styles.main}>
+        {/* KPI Cards */}
+        <section style={styles.kpiRow}>
+          {[
+            { label: "Piezas del mes", value: kpis.total, icon: "pieces", accent: "#B8F03E" },
+            { label: "Completado", value: `${kpis.pct}%`, icon: "check", accent: "#3EF0C8", sub: `${kpis.done} de ${kpis.total}` },
+            { label: "Atrasadas", value: kpis.late, icon: "alert", accent: kpis.late > 5 ? "#F04E3E" : "#F0E03E" },
+            { label: "Vel. promedio", value: `${kpis.avgDays}d`, icon: "speed", accent: "#3EB8F0" },
+          ].map((kpi, i) => (
+            <div key={i} style={styles.kpiCard}>
+              <div style={{ ...styles.kpiIcon, background: `${kpi.accent}18` }}>
+                <Icon name={kpi.icon} size={20} color={kpi.accent} />
+              </div>
+              <div>
+                <div style={{ ...styles.kpiValue, color: kpi.accent }}>{kpi.value}</div>
+                <div style={styles.kpiLabel}>{kpi.label}</div>
+                {kpi.sub && <div style={styles.kpiSub}>{kpi.sub}</div>}
+              </div>
+            </div>
+          ))}
+        </section>
+
+        {/* Two column grid */}
+        <div style={styles.grid2}>
+          {/* Client Progress */}
+          <section style={styles.card}>
+            <div style={styles.cardHeader}>
+              <h2 style={styles.cardTitle}>Progreso por cliente</h2>
+              <span style={styles.cardBadge}>{clientProgress.length} clientes</span>
+            </div>
+            <div style={styles.clientBars}>
+              {clientProgress.map((c) => (
+                <div
+                  key={c.id}
+                  style={styles.clientRow}
+                  onMouseEnter={() => setHoveredClient(c.id)}
+                  onMouseLeave={() => setHoveredClient(null)}
+                >
+                  <div style={styles.clientInfo}>
+                    <span style={{ ...styles.clientDot, background: c.color }} />
+                    <span style={styles.clientName}>{c.name}</span>
+                    {c.late > 0 && <span style={styles.lateBadge}>{c.late} atraso{c.late > 1 ? "s" : ""}</span>}
+                  </div>
+                  <div style={styles.barWrap}>
+                    <div
+                      style={{
+                        ...styles.barFill,
+                        width: `${Math.max(c.pct, 2)}%`,
+                        background: `linear-gradient(90deg, ${c.color}CC, ${c.color})`,
+                        opacity: hoveredClient === c.id ? 1 : 0.85,
+                      }}
+                    />
+                    {c.late > 0 && (
+                      <div
+                        style={{
+                          ...styles.barLateFill,
+                          width: `${Math.max((c.late / c.total) * 100, 2)}%`,
+                          left: `${c.pct}%`,
+                        }}
+                      />
+                    )}
+                  </div>
+                  <div style={styles.clientStats}>
+                    <span style={{ ...styles.clientPct, color: c.color }}>{c.pct}%</span>
+                    <span style={styles.clientCount}>{c.done}/{c.total}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Team Load */}
+          <section style={styles.card}>
+            <div style={styles.cardHeader}>
+              <h2 style={styles.cardTitle}>Carga del equipo</h2>
+              <Icon name="team" size={18} color="#666" />
+            </div>
+            <div style={styles.teamTable}>
+              <div style={styles.teamHeader}>
+                <span style={{ ...styles.teamCell, flex: 2 }}>Persona</span>
+                <span style={styles.teamCell}>Activas</span>
+                <span style={styles.teamCell}>Hechas</span>
+                <span style={styles.teamCell}>Eficiencia</span>
+              </div>
+              {teamLoad.map((t) => (
+                <div key={t.user_id} style={styles.teamRow}>
+                  <div style={{ ...styles.teamCell, flex: 2, display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ ...styles.teamAvatar, background: t.role === "founder" ? "#B8F03E22" : "#ffffff0a", color: t.role === "founder" ? "#B8F03E" : "#888" }}>
+                      {t.avatar}
+                    </div>
+                    <div>
+                      <div style={styles.teamName}>{t.display_name}</div>
+                      <div style={styles.teamRole}>{t.role}</div>
+                    </div>
+                  </div>
+                  <span style={{ ...styles.teamCell, ...styles.teamNum, color: t.active > 8 ? "#F04E3E" : "#ddd" }}>{t.active}</span>
+                  <span style={{ ...styles.teamCell, ...styles.teamNum }}>{t.done}</span>
+                  <span style={styles.teamCell}>
+                    <div style={styles.effWrap}>
+                      <div style={{ ...styles.effBar, width: `${t.eff}%`, background: t.eff >= 60 ? "#B8F03E" : t.eff >= 30 ? "#F0E03E" : "#F04E3E" }} />
+                      <span style={styles.effLabel}>{t.eff}%</span>
+                    </div>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        {/* Bottom row */}
+        <div style={styles.grid2}>
+          {/* Deadlines */}
+          <section style={styles.card}>
+            <div style={styles.cardHeader}>
+              <h2 style={styles.cardTitle}>Deadlines próximos 7 días</h2>
+              <Icon name="calendar" size={18} color="#666" />
+            </div>
+            {deadlines.length === 0 ? (
+              <p style={styles.emptyText}>Sin deadlines próximos</p>
+            ) : (
+              <div style={styles.deadlineList}>
+                {deadlines.map((p, i) => {
+                  const cl = clients.find(c => c.id === p.client_id);
+                  const d = new Date(p.deadline);
+                  const daysLeft = Math.round((d - now) / 86400000);
+                  return (
+                    <div key={i} style={styles.deadlineItem}>
+                      <div style={{ ...styles.deadlineDot, background: cl?.color || "#666" }} />
+                      <div style={styles.deadlineInfo}>
+                        <span style={styles.deadlineTitle}>{cl?.name} — {p.title}</span>
+                        <span style={styles.deadlineStage}>{STAGE_LABELS[p.status]}</span>
+                      </div>
+                      <div style={{ ...styles.deadlineDays, color: daysLeft <= 1 ? "#F04E3E" : daysLeft <= 3 ? "#F0E03E" : "#888" }}>
+                        {daysLeft === 0 ? "Hoy" : daysLeft === 1 ? "Mañana" : `${daysLeft}d`}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {/* Pepe AI PM */}
+          <section style={{ ...styles.card, ...styles.pepeCard }}>
+            <div style={styles.cardHeader}>
+              <div style={styles.pepeHeader}>
+                <div style={styles.pepeAvatar}>
+                  <span style={styles.pepeEmoji}>🤖</span>
+                </div>
+                <div>
+                  <h2 style={{ ...styles.cardTitle, margin: 0 }}>Pepe</h2>
+                  <span style={styles.pepeSub}>PM con IA — Recomendaciones</span>
+                </div>
+              </div>
+              <button onClick={() => setPepeOpen(!pepeOpen)} style={styles.pepeToggle}>
+                {pepeOpen ? "▾" : "▸"}
+              </button>
+            </div>
+            {pepeOpen && (
+              <div style={styles.pepeInsights}>
+                {pepeInsights.map((ins, i) => (
+                  <div key={i} style={{
+                    ...styles.insightItem,
+                    borderLeftColor: ins.type === "alert" ? "#F04E3E" : ins.type === "warning" ? "#F0E03E" : "#B8F03E",
+                  }}>
+                    <div style={{
+                      ...styles.insightDot,
+                      background: ins.type === "alert" ? "#F04E3E" : ins.type === "warning" ? "#F0E03E" : "#B8F03E",
+                    }} />
+                    <p style={styles.insightText}>{ins.text}</p>
+                  </div>
+                ))}
+                <div style={styles.pepeTip}>
+                  Datos actualizados al {now.toLocaleDateString("es-MX", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// ── Styles ──
+const styles = {
+  page: {
+    fontFamily: "'DM Sans', sans-serif",
+    background: "#0A0A0A",
+    minHeight: "100vh",
+    color: "#E0E0E0",
+  },
+  loadingWrap: {
+    fontFamily: "'DM Sans', sans-serif",
+    background: "#0A0A0A",
+    minHeight: "100vh",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+  },
+  loadingPulse: {
+    width: 40, height: 40,
+    borderRadius: "50%",
+    border: "3px solid #B8F03E22",
+    borderTopColor: "#B8F03E",
+    animation: "spin 0.8s linear infinite",
+  },
+  loadingText: { color: "#666", fontSize: 14, fontFamily: "'DM Sans', sans-serif" },
+
+  // Header
+  header: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "16px 28px",
+    borderBottom: "1px solid #1A1A1A",
+    position: "sticky",
+    top: 0,
+    background: "#0A0A0AEE",
+    backdropFilter: "blur(12px)",
+    zIndex: 100,
+  },
+  headerLeft: { display: "flex", alignItems: "center", gap: 12 },
+  logo: {
+    fontSize: 20,
+    fontWeight: 700,
+    color: "#B8F03E",
+    letterSpacing: "-0.5px",
+  },
+  headerSep: { color: "#2A2A2A", fontSize: 20 },
+  headerTitle: { color: "#888", fontSize: 14, fontWeight: 400 },
+  headerRight: { display: "flex", alignItems: "center", gap: 14 },
+  headerDate: { color: "#666", fontSize: 13, textTransform: "capitalize" },
+  avatarSmall: {
+    width: 32, height: 32,
+    borderRadius: "50%",
+    background: "#B8F03E18",
+    color: "#B8F03E",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 11,
+    fontWeight: 600,
+  },
+
+  // Main
+  main: { padding: "24px 28px", maxWidth: 1320, margin: "0 auto" },
+
+  // KPIs
+  kpiRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(4, 1fr)",
+    gap: 16,
+    marginBottom: 24,
+  },
+  kpiCard: {
+    background: "#111111",
+    border: "1px solid #1E1E1E",
+    borderRadius: 14,
+    padding: "20px 22px",
+    display: "flex",
+    alignItems: "center",
+    gap: 16,
+    transition: "border-color 0.2s",
+  },
+  kpiIcon: {
+    width: 44, height: 44,
+    borderRadius: 12,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  kpiValue: { fontSize: 28, fontWeight: 700, lineHeight: 1.1, letterSpacing: "-1px" },
+  kpiLabel: { fontSize: 12, color: "#777", marginTop: 2, fontWeight: 500 },
+  kpiSub: { fontSize: 11, color: "#555", marginTop: 1 },
+
+  // Grid
+  grid2: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 16,
+    marginBottom: 16,
+  },
+
+  // Card
+  card: {
+    background: "#111111",
+    border: "1px solid #1E1E1E",
+    borderRadius: 14,
+    padding: "22px 24px",
+  },
+  cardHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 18,
+  },
+  cardTitle: { fontSize: 15, fontWeight: 600, color: "#CCC", margin: 0 },
+  cardBadge: {
+    fontSize: 11,
+    color: "#888",
+    background: "#1A1A1A",
+    padding: "3px 10px",
+    borderRadius: 20,
+    fontWeight: 500,
+  },
+
+  // Client bars
+  clientBars: { display: "flex", flexDirection: "column", gap: 10 },
+  clientRow: {
+    display: "grid",
+    gridTemplateColumns: "180px 1fr 80px",
+    alignItems: "center",
+    gap: 12,
+    padding: "4px 0",
+    cursor: "default",
+  },
+  clientInfo: { display: "flex", alignItems: "center", gap: 8 },
+  clientDot: { width: 8, height: 8, borderRadius: "50%", flexShrink: 0 },
+  clientName: { fontSize: 13, fontWeight: 500, color: "#CCC", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  lateBadge: {
+    fontSize: 10,
+    color: "#F04E3E",
+    background: "#F04E3E18",
+    padding: "1px 7px",
+    borderRadius: 10,
+    fontWeight: 600,
+    whiteSpace: "nowrap",
+  },
+  barWrap: {
+    height: 8,
+    background: "#1A1A1A",
+    borderRadius: 6,
+    overflow: "hidden",
+    position: "relative",
+  },
+  barFill: {
+    height: "100%",
+    borderRadius: 6,
+    transition: "width 0.6s ease, opacity 0.2s",
+  },
+  barLateFill: {
+    height: "100%",
+    background: "#F04E3E55",
+    borderRadius: "0 6px 6px 0",
+    position: "absolute",
+    top: 0,
+  },
+  clientStats: { display: "flex", alignItems: "baseline", gap: 6, justifyContent: "flex-end" },
+  clientPct: { fontSize: 14, fontWeight: 700 },
+  clientCount: { fontSize: 11, color: "#555" },
+
+  // Team table
+  teamTable: {},
+  teamHeader: {
+    display: "flex",
+    gap: 8,
+    padding: "0 0 10px",
+    borderBottom: "1px solid #1A1A1A",
+    marginBottom: 6,
+  },
+  teamCell: { flex: 1, fontSize: 11, color: "#555", fontWeight: 500 },
+  teamRow: {
+    display: "flex",
+    gap: 8,
+    alignItems: "center",
+    padding: "10px 0",
+    borderBottom: "1px solid #0F0F0F",
+  },
+  teamAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 11,
+    fontWeight: 600,
+    flexShrink: 0,
+  },
+  teamName: { fontSize: 13, fontWeight: 500, color: "#CCC" },
+  teamRole: { fontSize: 11, color: "#555" },
+  teamNum: { fontSize: 15, fontWeight: 600, color: "#DDD" },
+  effWrap: {
+    width: "100%",
+    height: 6,
+    background: "#1A1A1A",
+    borderRadius: 4,
+    position: "relative",
+    overflow: "hidden",
+  },
+  effBar: {
+    height: "100%",
+    borderRadius: 4,
+    transition: "width 0.5s ease",
+  },
+  effLabel: { fontSize: 11, color: "#888", position: "absolute", right: 0, top: -16 },
+
+  // Deadlines
+  deadlineList: { display: "flex", flexDirection: "column", gap: 4 },
+  deadlineItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: "10px 0",
+    borderBottom: "1px solid #141414",
+  },
+  deadlineDot: { width: 6, height: 6, borderRadius: "50%", flexShrink: 0 },
+  deadlineInfo: { flex: 1, display: "flex", flexDirection: "column", gap: 2 },
+  deadlineTitle: { fontSize: 13, color: "#CCC", fontWeight: 500 },
+  deadlineStage: { fontSize: 11, color: "#666" },
+  deadlineDays: { fontSize: 13, fontWeight: 600, flexShrink: 0 },
+  emptyText: { color: "#444", fontSize: 13, textAlign: "center", padding: 30 },
+
+  // Pepe
+  pepeCard: { borderColor: "#B8F03E22" },
+  pepeHeader: { display: "flex", alignItems: "center", gap: 12 },
+  pepeAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    background: "#B8F03E18",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pepeEmoji: { fontSize: 20 },
+  pepeSub: { fontSize: 11, color: "#666", fontWeight: 400 },
+  pepeToggle: {
+    background: "none",
+    border: "none",
+    color: "#666",
+    cursor: "pointer",
+    fontSize: 16,
+    padding: 4,
+  },
+  pepeInsights: { display: "flex", flexDirection: "column", gap: 10 },
+  insightItem: {
+    borderLeft: "3px solid",
+    paddingLeft: 14,
+    padding: "10px 14px",
+    background: "#0D0D0D",
+    borderRadius: "0 8px 8px 0",
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  insightDot: { width: 7, height: 7, borderRadius: "50%", flexShrink: 0, marginTop: 6 },
+  insightText: { fontSize: 13, color: "#BBB", margin: 0, lineHeight: 1.5 },
+  pepeTip: {
+    fontSize: 11,
+    color: "#444",
+    textAlign: "right",
+    marginTop: 6,
+  },
+};
