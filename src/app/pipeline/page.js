@@ -1,35 +1,70 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { getSession, isAdmin } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
-import { C, FLOW_FULL, PIECE_LABELS, PIECE_COLORS, STAGE_LABELS, ROLE_COLORS, CURRENT_PERIOD } from '@/lib/tokens';
+import {
+  C, FLOW_FULL, FLOW_SHORT, PIECE_LABELS, PIECE_COLORS,
+  STAGE_LABELS, ROLE_COLORS, ROLE_LABELS, CURRENT_PERIOD,
+} from '@/lib/tokens';
 import NavHeader from '@/components/NavHeader';
 
-// ── Kanban stages (consistent with tokens.js FLOW_FULL) ──
-const KANBAN_STAGES = FLOW_FULL.map(f => ({ k: f.k, l: f.l, c: f.c }));
-const STAGE_KEYS = KANBAN_STAGES.map(s => s.k);
+// ═══════════════════════════════════════════════════════════════════════════
+// Constants derived from tokens.js (single source of truth)
+// ═══════════════════════════════════════════════════════════════════════════
+const KANBAN_COLS = FLOW_FULL.map(f => ({ k: f.k, l: f.l, c: f.c }));
+const SK = KANBAN_COLS.map(s => s.k);
+const ACTIVE_STAGES = FLOW_FULL.filter(f => f.k !== 'pendiente' && f.k !== 'publicado');
 
-// Stage → DB field mappings
-const ASSIGNED_FIELDS = {};
-const OUTPUT_FIELDS = {};
+// Build field maps dynamically
+const AF = {}, OF = {}, OT = {};
 FLOW_FULL.forEach(f => {
   if (f.k !== 'pendiente' && f.k !== 'publicado') {
-    ASSIGNED_FIELDS[f.k] = f.k + '_assigned';
-    OUTPUT_FIELDS[f.k] = f.k + '_output';
+    AF[f.k] = f.k + '_assigned';
+    OF[f.k] = f.k + '_output';
+    OT[f.k] = f.ot; // 'url','text','file'
   }
 });
 
-// Output type per stage
-const OUTPUT_TYPES = {
-  research: 'url', guion: 'text', aprobacion: 'approval',
-  grabacion: 'file', edicion: 'file', revision_cliente: 'approval',
+// Client plans (mirrors brief)
+const CLIENT_PLANS = {
+  c1:  { pieces: [{ n: 12, t: 'reel' }, { n: 4, t: 'carrusel' }, { n: 1, t: 'gestion_ads' }], flow: 'full' },
+  c2:  { pieces: [{ n: 12, t: 'reel' }, { n: 4, t: 'fast_reel' }, { n: 4, t: 'carrusel' }, { n: 1, t: 'gestion_ads' }], flow: 'full' },
+  c3:  { pieces: [{ n: 12, t: 'reel' }, { n: 4, t: 'fast_reel' }, { n: 4, t: 'carrusel' }, { n: 1, t: 'gestion_ads' }], flow: 'full' },
+  c4:  { pieces: [{ n: 6, t: 'video' }, { n: 3, t: 'imagen' }, { n: 1, t: 'gestion_ads' }], flow: 'full' },
+  c5:  { pieces: [{ n: 6, t: 'video' }, { n: 3, t: 'imagen' }, { n: 1, t: 'gestion_ads' }], flow: 'full' },
+  c6:  { pieces: [{ n: 4, t: 'episodio_youtube' }, { n: 24, t: 'reel_episodio' }, { n: 6, t: 'reel_individual' }], flow: 'short' },
+  c7:  { pieces: [{ n: 4, t: 'episodio_youtube' }, { n: 8, t: 'reel_grabacion' }, { n: 4, t: 'reel_predica' }, { n: 4, t: 'carrusel' }], flow: 'short' },
+  c8:  { pieces: [{ n: 8, t: 'clip_predica' }], flow: 'short' },
+  c9:  { pieces: [{ n: 4, t: 'reel' }], flow: 'full' },
 };
 
-// ── Helpers ──
-function getStage(k) { return KANBAN_STAGES.find(s => s.k === k) || KANBAN_STAGES[0]; }
-function nextStage(k) { const i = STAGE_KEYS.indexOf(k); return i >= 0 && i < STAGE_KEYS.length - 1 ? KANBAN_STAGES[i + 1] : null; }
-function fmtDeadline(d) {
+const DEMO_CLIENTS = [
+  { id: 'c1', name: 'Cire', color: '#B8F03E' },
+  { id: 'c2', name: 'Brillo Mío Valle', color: '#3EF0C8' },
+  { id: 'c3', name: 'Brillo Mío Santa Fe', color: '#3EB8F0' },
+  { id: 'c4', name: 'Beauty Design SJ', color: '#F0A03E' },
+  { id: 'c5', name: 'Beauty Design Barbería', color: '#F03E7A' },
+  { id: 'c6', name: 'Sandy Arcos', color: '#C83EF0' },
+  { id: 'c7', name: 'Profeta Mariana', color: '#F0E03E' },
+  { id: 'c8', name: 'Apóstol Víctor', color: '#3EF06A' },
+  { id: 'c9', name: 'Diveland', color: '#F07A3E' },
+];
+const DEMO_TEAM = [
+  { username: 'fer_ayala', display_name: 'Fer Ayala', role: 'founder' },
+  { username: 'yaz_antonio', display_name: 'Yaz Antonio', role: 'cofounder' },
+  { username: 'natha_barragan', display_name: 'Natha Barragán', role: 'asistente' },
+  { username: 'jose_camacho', display_name: 'José Camacho', role: 'editor' },
+  { username: 'alhena_taboada', display_name: 'Alhena Taboada', role: 'filmaker' },
+  { username: 'mariana_yudico', display_name: 'Mariana Yudico', role: 'filmaker' },
+];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════════════════════════════════
+function stg(k) { return KANBAN_COLS.find(s => s.k === k) || KANBAN_COLS[0]; }
+function nextStg(k) { const i = SK.indexOf(k); return i >= 0 && i < SK.length - 1 ? KANBAN_COLS[i + 1] : null; }
+function fmtDl(d) {
   if (!d) return '—';
   const dt = new Date(d + 'T12:00:00'), now = new Date(), diff = Math.ceil((dt - now) / 864e5);
   const f = dt.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
@@ -38,7 +73,7 @@ function fmtDeadline(d) {
   if (diff <= 3) return `${f} (${diff}d)`;
   return f;
 }
-function isOverdue(d) { return d && new Date(d + 'T12:00:00') < new Date(); }
+function isOD(d) { return d && new Date(d + 'T12:00:00') < new Date(); }
 function getMonths() {
   const m = [], now = new Date();
   for (let i = -2; i <= 3; i++) {
@@ -47,59 +82,59 @@ function getMonths() {
   }
   return m;
 }
+function shortName(m) { return (m.display_name || m.username || '').split(' ')[0]; }
 
-// ── Demo data (fallback when DB is empty) ──
-const DEMO_CLIENTS = [
-  { id: 'c1', name: 'Cire' }, { id: 'c2', name: 'Brillo Mío Valle' }, { id: 'c3', name: 'Brillo Mío Santa Fe' },
-  { id: 'c4', name: 'Beauty Design SJ' }, { id: 'c5', name: 'Beauty Design Barbería' },
-  { id: 'c6', name: 'Sandy Arcos' }, { id: 'c7', name: 'Profeta Mariana' }, { id: 'c8', name: 'Apóstol Víctor' }, { id: 'c9', name: 'Diveland' },
-];
-const DEMO_TEAM = [
-  { username: 'fer_ayala', display_name: 'Fer', role: 'founder' },
-  { username: 'yaz_antonio', display_name: 'Yaz', role: 'cofounder' },
-  { username: 'natha_barragan', display_name: 'Natha', role: 'asistente' },
-  { username: 'jose_camacho', display_name: 'José', role: 'editor' },
-  { username: 'alhena_taboada', display_name: 'Alhena', role: 'filmaker' },
-  { username: 'mariana_yudico', display_name: 'Mariana Y', role: 'filmaker' },
-];
+// ═══════════════════════════════════════════════════════════════════════════
+// PEPE: Auto-generate pieces + round-robin assignment
+// ═══════════════════════════════════════════════════════════════════════════
+function pepeGeneratePieces(clientId, period, pool) {
+  const plan = CLIENT_PLANS[clientId];
+  if (!plan) return [];
+  const pieces = [];
+  let idx = 0;
+  const now = new Date();
+  const [year, month] = period.split('-').map(Number);
 
-function makeDemoPieces(clientId) {
-  const defs = {
-    c1: [{ t: 'Reel - Resultados láser', y: 'reel' }, { t: 'Reel - Testimonio Karla', y: 'reel' }, { t: 'Carrusel - Promo mayo', y: 'carrusel' }, { t: 'Reel - Antes/después', y: 'reel' }, { t: 'Ad - Conversión WhatsApp', y: 'gestion_ads' }, { t: 'Reel - Proceso láser', y: 'reel' }, { t: 'Carrusel - Tips cuidado', y: 'carrusel' }, { t: 'Reel - Modelo sesión', y: 'reel' }],
-    c2: [{ t: 'Reel - Transformación color', y: 'reel' }, { t: 'Reel - Balayage tutorial', y: 'reel' }, { t: 'Fast - Corte express', y: 'fast_reel' }, { t: 'Carrusel - Tendencias 2026', y: 'carrusel' }, { t: 'Reel - Cliente feliz', y: 'reel' }, { t: 'Fast - Blow dry ASMR', y: 'fast_reel' }],
-    c6: [{ t: 'Ep 14 - Emprendimiento digital', y: 'episodio_youtube' }, { t: 'Clip 14.1 - Mejor consejo', y: 'reel_episodio' }, { t: 'Clip 14.2 - Error más grande', y: 'reel_episodio' }, { t: 'Reel - Sandy reacts', y: 'reel_individual' }],
-    c7: [{ t: 'Ep - Predica domingo 23', y: 'episodio_youtube' }, { t: 'Clip prédica - Fe', y: 'clip_predica' }, { t: 'Reel grabación BTS', y: 'reel_grabacion' }, { t: 'Carrusel - Versículo semana', y: 'carrusel' }],
-  };
-  const p = defs[clientId] || [{ t: 'Pieza 1', y: 'reel' }, { t: 'Pieza 2', y: 'reel' }, { t: 'Pieza 3', y: 'carrusel' }];
-  const tu = DEMO_TEAM.map(t => t.username);
-  return p.map((x, i) => {
-    const s = STAGE_KEYS[i % STAGE_KEYS.length];
-    const dl = new Date(); dl.setDate(dl.getDate() + (i * 3 - 5));
-    const piece = {
-      id: `demo-${clientId}-${i}`, client_id: clientId, title: x.t, type: x.y, status: s,
-      deadline: dl.toISOString().split('T')[0], period: CURRENT_PERIOD,
-    };
-    // Fill assigned/output fields for stages that are "past"
-    const si = STAGE_KEYS.indexOf(s);
-    STAGE_KEYS.forEach((sk, idx) => {
-      if (ASSIGNED_FIELDS[sk]) piece[ASSIGNED_FIELDS[sk]] = tu[(i + idx) % tu.length];
-      if (OUTPUT_FIELDS[sk]) {
-        if (idx < si) {
-          // Past stages have output
-          if (OUTPUT_TYPES[sk] === 'url') { piece[OUTPUT_FIELDS[sk]] = 'https://instagram.com/reel/example'; piece.research_comment = 'Hook fuerte, corte rápido'; }
-          else if (OUTPUT_TYPES[sk] === 'text') piece[OUTPUT_FIELDS[sk]] = '• Abre con pregunta\n• Muestra resultado\n• CTA';
-          else if (OUTPUT_TYPES[sk] === 'file') piece[OUTPUT_FIELDS[sk]] = `archivo_${sk}.mp4`;
-          else if (OUTPUT_TYPES[sk] === 'approval') piece[OUTPUT_FIELDS[sk]] = 'approved';
+  plan.pieces.forEach(({ n, t }) => {
+    for (let i = 0; i < n; i++) {
+      idx++;
+      const pieceNum = idx;
+      const label = PIECE_LABELS[t] || t;
+      // Spread deadlines across the month
+      const day = Math.min(Math.ceil((idx / plan.pieces.reduce((s, p) => s + p.n, 0)) * 28) + 1, 28);
+      const deadline = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+      const piece = {
+        id: `gen-${clientId}-${period}-${idx}`,
+        client_id: clientId,
+        title: `${label} ${i + 1}`,
+        type: t,
+        status: 'pendiente',
+        deadline,
+        period,
+      };
+
+      // Round-robin assign from pool for each stage
+      ACTIVE_STAGES.forEach(st => {
+        const stagePool = pool[st.k] || [];
+        if (stagePool.length > 0) {
+          piece[AF[st.k]] = stagePool[(idx - 1) % stagePool.length];
         } else {
-          piece[OUTPUT_FIELDS[sk]] = null;
+          piece[AF[st.k]] = null;
         }
-      }
-    });
-    return piece;
+        piece[OF[st.k]] = null;
+      });
+
+      pieces.push(piece);
+    }
   });
+
+  return pieces;
 }
 
-// ── Styles ──
+// ═══════════════════════════════════════════════════════════════════════════
+// Styles
+// ═══════════════════════════════════════════════════════════════════════════
 const S = {
   sel: {
     background: C.card, border: `1px solid ${C.brd}`, borderRadius: 8, color: C.txt,
@@ -109,287 +144,389 @@ const S = {
     backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center',
   },
   inp: {
-    width: '100%', background: C.card, border: `1px solid ${C.brd}`, borderRadius: 8,
+    width: '100%', background: C.bg, border: `1px solid ${C.brd}`, borderRadius: 8,
     color: C.txt, padding: '10px 14px', fontSize: 13, fontFamily: 'inherit',
     outline: 'none', resize: 'vertical', boxSizing: 'border-box',
   },
+  btn: (primary) => ({
+    padding: primary ? '9px 20px' : '8px 16px', borderRadius: 8, border: 'none',
+    background: primary ? C.acc : C.card, color: primary ? C.accTxt : C.txt,
+    fontSize: 13, fontWeight: primary ? 700 : 600, cursor: 'pointer', fontFamily: 'inherit',
+    transition: 'opacity .15s',
+  }),
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Sub-components
+// Small components
 // ═══════════════════════════════════════════════════════════════════════════
-
-function Avatar({ username, team, size = 22 }) {
+function Av({ username, team, size = 22 }) {
   const m = team.find(t => t.username === username);
-  const ini = m ? (m.display_name || m.username).slice(0, 2).toUpperCase() : '??';
+  const ini = m ? shortName(m).slice(0, 2).toUpperCase() : '??';
   const rc = ROLE_COLORS[m?.role] || C.txtS;
-  return (
-    <div title={m?.display_name || username} style={{
-      width: size, height: size, borderRadius: '50%',
-      background: `${rc}22`, color: rc, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: size * 0.4, fontWeight: 700, flexShrink: 0, border: `1.5px solid ${C.bg}`,
-    }}>{ini}</div>
-  );
+  return <div title={m?.display_name || username} style={{ width: size, height: size, borderRadius: '50%', background: `${rc}22`, color: rc, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.38, fontWeight: 700, flexShrink: 0, border: `1.5px solid ${C.bg}` }}>{ini}</div>;
 }
 
 function Badge({ children, color = C.acc }) {
   return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 20, background: `${color}18`, color, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>{children}</span>;
 }
 
-function PipelineCard({ piece, onClick, team }) {
+// ═══════════════════════════════════════════════════════════════════════════
+// POOL PANEL (sidebar)
+// ═══════════════════════════════════════════════════════════════════════════
+function PoolPanel({ pool, setPool, team, clientColor, onGenerate, pieceCount }) {
+  const toggle = (stageKey, username) => {
+    setPool(prev => {
+      const next = { ...prev };
+      const list = [...(next[stageKey] || [])];
+      const idx = list.indexOf(username);
+      if (idx >= 0) list.splice(idx, 1); else list.push(username);
+      next[stageKey] = list;
+      return next;
+    });
+  };
+
+  return (
+    <div style={{
+      width: 280, flexShrink: 0, background: C.card, borderRight: `1px solid ${C.brd}`,
+      display: 'flex', flexDirection: 'column', height: 'calc(100vh - 56px)',
+      overflowY: 'auto',
+    }}>
+      {/* Header */}
+      <div style={{ padding: '16px 18px 12px', borderBottom: `1px solid ${C.brd}` }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.wh, marginBottom: 4 }}>Pool del equipo</div>
+        <div style={{ fontSize: 11, color: C.txtM }}>Asigna quién trabaja en cada etapa. Pepe reparte las piezas automáticamente.</div>
+      </div>
+
+      {/* Stages */}
+      <div style={{ padding: '8px 12px', flex: 1 }}>
+        {ACTIVE_STAGES.map(st => {
+          const assigned = pool[st.k] || [];
+          return (
+            <div key={st.k} style={{ marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: st.c }} />
+                <span style={{ fontSize: 11, fontWeight: 700, color: C.txt, textTransform: 'uppercase', letterSpacing: '.04em' }}>{st.l}</span>
+                <span style={{ fontSize: 10, color: C.txtM, marginLeft: 'auto' }}>{assigned.length}</span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {team.map(m => {
+                  const sel = assigned.includes(m.username);
+                  const rc = ROLE_COLORS[m.role] || C.txtS;
+                  return (
+                    <button key={m.username} onClick={() => toggle(st.k, m.username)} style={{
+                      display: 'flex', alignItems: 'center', gap: 4,
+                      padding: '3px 8px 3px 4px', borderRadius: 14,
+                      background: sel ? `${rc}18` : 'transparent',
+                      border: `1px solid ${sel ? rc + '55' : C.brd}`,
+                      color: sel ? rc : C.txtM,
+                      fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                      transition: 'all .12s',
+                    }}>
+                      <Av username={m.username} team={team} size={16} />
+                      {shortName(m)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Generate button */}
+      <div style={{ padding: '12px 16px', borderTop: `1px solid ${C.brd}` }}>
+        {pieceCount > 0 ? (
+          <div style={{ fontSize: 11, color: C.txtM, textAlign: 'center', marginBottom: 8 }}>
+            {pieceCount} piezas ya generadas este mes
+          </div>
+        ) : null}
+        <button onClick={onGenerate} style={{
+          ...S.btn(true), width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+        }}>
+          🤖 {pieceCount > 0 ? 'Regenerar piezas' : 'Generar piezas del mes'}
+        </button>
+        {pieceCount > 0 && (
+          <div style={{ fontSize: 10, color: C.amb, textAlign: 'center', marginTop: 6 }}>
+            Regenerar reemplaza las piezas en "Pendiente"
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// KANBAN CARD
+// ═══════════════════════════════════════════════════════════════════════════
+function Card({ piece, onClick, team }) {
   const pl = PIECE_LABELS[piece.type] || piece.type;
   const pc = PIECE_COLORS[piece.type] || C.txtS;
-  const od = isOverdue(piece.deadline) && piece.status !== 'publicado';
-  const af = ASSIGNED_FIELDS[piece.status];
-  const au = af ? piece[af] : null;
+  const od = isOD(piece.deadline) && piece.status !== 'publicado';
+  const au = AF[piece.status] ? piece[AF[piece.status]] : null;
+
   return (
     <div onClick={() => onClick(piece)} style={{
-      background: C.card, border: `1px solid ${od ? C.red + '44' : C.brd}`, borderRadius: 8,
-      padding: '10px 12px', cursor: 'pointer', transition: 'all .15s',
+      background: C.card, border: `1px solid ${od ? C.red + '33' : C.brd}`, borderRadius: 8,
+      padding: '9px 11px', cursor: 'pointer', transition: 'all .12s',
     }}
-      onMouseEnter={e => { e.currentTarget.style.background = C.cardH; e.currentTarget.style.borderColor = od ? C.red + '66' : C.brdH; }}
-      onMouseLeave={e => { e.currentTarget.style.background = C.card; e.currentTarget.style.borderColor = od ? C.red + '44' : C.brd; }}
+      onMouseEnter={e => { e.currentTarget.style.background = C.cardH; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+      onMouseLeave={e => { e.currentTarget.style.background = C.card; e.currentTarget.style.transform = 'none'; }}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 6 }}>
-        <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: `${pc}18`, color: pc, fontWeight: 600, whiteSpace: 'nowrap', marginTop: 1 }}>{pl}</span>
-        <span style={{ fontSize: 12.5, fontWeight: 600, color: C.txt, lineHeight: '17px', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{piece.title}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
+        <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: `${pc}15`, color: pc, fontWeight: 700 }}>{pl}</span>
       </div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: C.txt, lineHeight: '16px', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{piece.title}</div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 11, color: od ? C.red : C.txtM, fontWeight: od ? 600 : 400 }}>{fmtDeadline(piece.deadline)}</span>
-        {au && <Avatar username={au} team={team} size={20} />}
+        <span style={{ fontSize: 10, color: od ? C.red : C.txtM, fontWeight: od ? 600 : 400 }}>{fmtDl(piece.deadline)}</span>
+        {au && <Av username={au} team={team} size={18} />}
       </div>
     </div>
   );
 }
 
-function KanbanColumn({ stage, pieces, onCardClick, team }) {
+function Column({ stage, pieces, onCardClick, team }) {
   return (
-    <div style={{ flex: '0 0 210px', display: 'flex', flexDirection: 'column', background: C.bg, borderRadius: 10, border: `1px solid ${C.brd}`, minHeight: 200, maxHeight: 'calc(100vh - 170px)' }}>
-      <div style={{ padding: '10px 12px', borderBottom: `1px solid ${C.brd}`, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: stage.c }} />
-        <span style={{ fontSize: 12, fontWeight: 700, color: C.txt }}>{stage.l}</span>
-        <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 600, color: C.txtM, background: C.card, padding: '1px 7px', borderRadius: 10 }}>{pieces.length}</span>
+    <div style={{ flex: '0 0 195px', display: 'flex', flexDirection: 'column', background: C.bg, borderRadius: 10, border: `1px solid ${C.brd}`, minHeight: 180, maxHeight: 'calc(100vh - 180px)' }}>
+      <div style={{ padding: '9px 11px', borderBottom: `1px solid ${C.brd}`, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: stage.c }} />
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: C.txt }}>{stage.l}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 600, color: C.txtM, background: C.card, padding: '1px 6px', borderRadius: 8 }}>{pieces.length}</span>
       </div>
-      <div style={{ padding: 6, display: 'flex', flexDirection: 'column', gap: 5, overflowY: 'auto', flex: 1 }}>
-        {pieces.map(p => <PipelineCard key={p.id} piece={p} onClick={onCardClick} team={team} />)}
-        {pieces.length === 0 && <div style={{ padding: 20, textAlign: 'center', fontSize: 12, color: C.txtM, fontStyle: 'italic' }}>Sin piezas</div>}
+      <div style={{ padding: 5, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto', flex: 1 }}>
+        {pieces.map(p => <Card key={p.id} piece={p} onClick={onCardClick} team={team} />)}
+        {!pieces.length && <div style={{ padding: 16, textAlign: 'center', fontSize: 11, color: C.txtM, fontStyle: 'italic' }}>—</div>}
       </div>
     </div>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Modal with Stage Panels
+// PIECE DETAIL MODAL — full view/edit for every stage
 // ═══════════════════════════════════════════════════════════════════════════
-
-function StagePanel({ stageKey, piece, team, onAssign, onOutput, onAdvance, onSave }) {
-  const af = ASSIGNED_FIELDS[stageKey], of2 = OUTPUT_FIELDS[stageKey], ot = OUTPUT_TYPES[stageKey];
-  const assigned = af ? piece[af] : null;
-  const output = of2 ? piece[of2] : null;
-  const ci = STAGE_KEYS.indexOf(piece.status), ti = STAGE_KEYS.indexOf(stageKey);
-  const isCur = ti === ci, isPast = ti < ci, isFut = ti > ci;
-  const ns = nextStage(stageKey);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {af && (
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Responsable</div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {team.map(m => {
-              const sel = assigned === m.username;
-              const rc = ROLE_COLORS[m.role] || C.txtS;
-              return (
-                <button key={m.username} onClick={() => onAssign(stageKey, m.username)} style={{
-                  display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px 5px 6px', borderRadius: 20,
-                  background: sel ? `${rc}22` : C.card, border: `1.5px solid ${sel ? rc : C.brd}`,
-                  color: sel ? rc : C.txtS, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-                }}>
-                  <Avatar username={m.username} team={team} size={20} />
-                  {m.display_name || m.username}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {of2 && (
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
-            Output {isPast && output ? '✓' : isCur ? '(requerido para avanzar)' : ''}
-          </div>
-
-          {ot === 'url' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <input type="url" placeholder="URL de referencia viral" value={piece.research_output || ''} onChange={e => onOutput('research_output', e.target.value)} disabled={!isCur} style={{ ...S.inp, opacity: isCur ? 1 : .6 }} />
-              <textarea placeholder="¿Por qué funciona esta referencia?" value={piece.research_comment || ''} onChange={e => onOutput('research_comment', e.target.value)} rows={3} disabled={!isCur} style={{ ...S.inp, opacity: isCur ? 1 : .6 }} />
-            </div>
-          )}
-          {ot === 'text' && (
-            <textarea placeholder={'• Abre con pregunta\n• Muestra resultado\n• CTA directo'} value={output || ''} rows={6} onChange={e => onOutput(of2, e.target.value)} disabled={!isCur} style={{ ...S.inp, opacity: isCur ? 1 : .6, fontFamily: 'monospace', lineHeight: 1.7 }} />
-          )}
-          {ot === 'file' && (
-            output ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: C.card, borderRadius: 8, border: `1px solid ${C.brd}` }}>
-                <span style={{ fontSize: 20 }}>📎</span>
-                <span style={{ fontSize: 13, color: C.txt, flex: 1 }}>{output}</span>
-                {isCur && <button onClick={() => onOutput(of2, null)} style={{ background: 'none', border: 'none', color: C.red, fontSize: 12, cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit' }}>Quitar</button>}
-              </div>
-            ) : (
-              <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '28px 20px', background: C.card, border: `2px dashed ${isCur ? C.brdH : C.brd}`, borderRadius: 8, cursor: isCur ? 'pointer' : 'default', opacity: isCur ? 1 : .5 }}>
-                <span style={{ fontSize: 28, opacity: .5 }}>📤</span>
-                <span style={{ fontSize: 12, color: C.txtM }}>{isCur ? 'Clic para subir archivo' : 'Archivo pendiente'}</span>
-                {isCur && <input type="file" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) onOutput(of2, f.name); }} />}
-              </label>
-            )
-          )}
-          {ot === 'approval' && (
-            output === 'approved' ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', background: C.tealDim, borderRadius: 8, border: `1px solid ${C.teal}33` }}>
-                <span style={{ fontSize: 18 }}>✅</span><span style={{ fontSize: 13, fontWeight: 600, color: C.teal }}>Aprobado</span>
-              </div>
-            ) : output === 'rejected' ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', background: C.redDim, borderRadius: 8, border: `1px solid ${C.red}33` }}>
-                <span style={{ fontSize: 18 }}>❌</span><span style={{ fontSize: 13, fontWeight: 600, color: C.red }}>Rechazado</span>
-              </div>
-            ) : isCur ? (
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button onClick={() => onOutput(of2, 'approved')} style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: C.acc, color: C.accTxt, fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>✓ Aprobar</button>
-                <button onClick={() => onOutput(of2, 'rejected')} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${C.red}44`, background: 'transparent', color: C.red, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>✕ Rechazar</button>
-              </div>
-            ) : <span style={{ fontSize: 12, color: C.txtM, fontStyle: 'italic' }}>Pendiente de revisión</span>
-          )}
-        </div>
-      )}
-
-      <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-        {isCur && of2 && <button onClick={() => onSave()} style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: C.card, color: C.txt, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Guardar</button>}
-        {isCur && output && ns && <button onClick={() => onAdvance(stageKey)} style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: C.acc, color: C.accTxt, fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Avanzar a {ns.l} →</button>}
-        {isFut && <span style={{ fontSize: 12, color: C.txtM, fontStyle: 'italic', alignSelf: 'center' }}>Esta etapa aún no está activa</span>}
-      </div>
-    </div>
-  );
-}
-
-function PieceModal({ piece, onClose, onUpdate, team }) {
+function PieceModal({ piece, onClose, onUpdate, onDelete, team }) {
   const [local, setLocal] = useState({ ...piece });
   const [tab, setTab] = useState(piece.status === 'pendiente' ? 'research' : piece.status);
   const [saving, setSaving] = useState(false);
+  const [editTitle, setEditTitle] = useState(false);
 
   useEffect(() => { setLocal({ ...piece }); }, [piece]);
 
-  const handleAssign = (sk, username) => {
-    const f = ASSIGNED_FIELDS[sk]; if (!f) return;
-    const up = { ...local, [f]: username };
-    setLocal(up);
-  };
+  const set = (field, val) => setLocal(prev => ({ ...prev, [field]: val }));
+  const sg = stg(local.status);
+  const od = isOD(local.deadline) && local.status !== 'publicado';
+  const pt = PIECE_LABELS[local.type] || local.type;
+  const pc = PIECE_COLORS[local.type] || C.txtS;
 
-  const handleOutput = (field, value) => {
-    setLocal(prev => ({ ...prev, [field]: value }));
+  const handleSave = async () => {
+    setSaving(true);
+    if (!local.id.startsWith('gen-') && !local.id.startsWith('new-')) {
+      try { await supabase.from('content_pieces').update(local).eq('id', local.id); } catch {}
+    }
+    onUpdate(local);
+    setSaving(false);
   };
 
   const handleAdvance = (sk) => {
-    const ns = nextStage(sk); if (!ns) return;
+    const ns = nextStg(sk);
+    if (!ns) return;
     const up = { ...local, status: ns.k };
     setLocal(up);
     onUpdate(up);
     setTab(ns.k);
   };
 
-  const handleSave = async () => {
-    setSaving(true);
-    // Try to save to Supabase
-    if (!local.id.startsWith('demo-')) {
-      try {
-        const { id, ...updates } = local;
-        await supabase.from('content_pieces').update(updates).eq('id', id);
-      } catch (e) { console.error('Save failed:', e); }
-    }
-    onUpdate(local);
-    setSaving(false);
-  };
-
-  const pt = PIECE_LABELS[local.type] || local.type;
-  const pc = PIECE_COLORS[local.type] || C.txtS;
-  const sg = getStage(local.status);
-  const od = isOverdue(local.deadline) && local.status !== 'publicado';
-  const activeTabs = KANBAN_STAGES.filter(s => s.k !== 'pendiente');
-
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.7)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: C.cardH, borderRadius: 14, border: `1px solid ${C.brdH}`, width: '100%', maxWidth: 700, maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 4px 24px rgba(0,0,0,.4)' }}>
-        <div style={{ padding: '18px 24px', borderBottom: `1px solid ${C.brd}`, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-          <div style={{ flex: 1 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 700, color: C.wh, margin: 0 }}>{local.title}</h2>
-            <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-              <Badge color={pc}>{pt}</Badge>
-              <Badge color={sg.c}>{sg.l}</Badge>
-              {od && <Badge color={C.red}>Atrasada</Badge>}
-              <span style={{ fontSize: 12, color: C.txtM }}>Deadline: {fmtDeadline(local.deadline)}</span>
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.75)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#131313', borderRadius: 16, border: `1px solid ${C.brdH}`, width: '100%', maxWidth: 760, maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 40px rgba(0,0,0,.5)' }}>
+
+        {/* ── Header ── */}
+        <div style={{ padding: '18px 24px 14px', borderBottom: `1px solid ${C.brd}` }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              {editTitle ? (
+                <input value={local.title} onChange={e => set('title', e.target.value)} onBlur={() => setEditTitle(false)} onKeyDown={e => e.key === 'Enter' && setEditTitle(false)} autoFocus style={{ ...S.inp, fontSize: 16, fontWeight: 700, padding: '4px 8px', background: 'transparent', border: `1px solid ${C.brdH}` }} />
+              ) : (
+                <h2 onClick={() => setEditTitle(true)} style={{ fontSize: 16, fontWeight: 700, color: C.wh, margin: 0, cursor: 'pointer' }} title="Clic para editar">{local.title}</h2>
+              )}
+              <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <Badge color={pc}>{pt}</Badge>
+                <Badge color={sg.c}>{sg.l}</Badge>
+                {od && <Badge color={C.red}>Atrasada</Badge>}
+                <span style={{ fontSize: 12, color: C.txtM }}>Deadline: </span>
+                <input type="date" value={local.deadline || ''} onChange={e => set('deadline', e.target.value)} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 6, color: C.txt, padding: '2px 8px', fontSize: 12, fontFamily: 'inherit', outline: 'none', colorScheme: 'dark' }} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => { onDelete(local.id); onClose(); }} style={{ background: 'none', border: `1px solid ${C.red}33`, color: C.red, fontSize: 11, padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}>Eliminar</button>
+              <button onClick={onClose} style={{ background: 'none', border: 'none', color: C.txtM, fontSize: 20, cursor: 'pointer', padding: 4, lineHeight: 1 }}>✕</button>
             </div>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: C.txtM, fontSize: 20, cursor: 'pointer', padding: 4 }}>✕</button>
         </div>
 
+        {/* ── Stage tabs ── */}
         <div style={{ display: 'flex', borderBottom: `1px solid ${C.brd}`, overflowX: 'auto', flexShrink: 0 }}>
-          {activeTabs.map(s => {
+          {KANBAN_COLS.filter(s => s.k !== 'pendiente').map(s => {
             const isAct = tab === s.k;
-            const si = STAGE_KEYS.indexOf(s.k), ci = STAGE_KEYS.indexOf(local.status);
+            const si = SK.indexOf(s.k), ci = SK.indexOf(local.status);
             const isPast = si < ci, isCur = si === ci;
-            const of2 = OUTPUT_FIELDS[s.k], ho = of2 && local[of2];
+            const hasOut = OF[s.k] && local[OF[s.k]];
             return (
               <button key={s.k} onClick={() => setTab(s.k)} style={{
-                background: isAct ? C.card : 'transparent',
-                border: 'none', borderBottom: isAct ? `2px solid ${s.c}` : '2px solid transparent',
-                color: isAct ? C.wh : C.txtM, padding: '10px 14px', fontSize: 11.5, fontWeight: 600,
-                cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'inherit',
+                background: isAct ? C.card : 'transparent', border: 'none',
+                borderBottom: isAct ? `2px solid ${s.c}` : '2px solid transparent',
+                color: isAct ? C.wh : isPast ? (hasOut ? C.txtS : C.txtM) : C.txtM,
+                padding: '10px 13px', fontSize: 11, fontWeight: 600,
+                cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit',
+                display: 'flex', alignItems: 'center', gap: 4,
               }}>
-                {isPast && ho && <span style={{ color: C.teal, fontSize: 12 }}>✓</span>}
-                {isCur && <span style={{ width: 5, height: 5, borderRadius: '50%', background: s.c }} />}
+                {isPast && hasOut && <span style={{ color: C.teal, fontSize: 11 }}>✓</span>}
+                {isCur && <span style={{ width: 5, height: 5, borderRadius: '50%', background: s.c, flexShrink: 0 }} />}
                 {s.l}
               </button>
             );
           })}
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
-          <StagePanel
-            stageKey={tab} piece={local} team={team}
-            onAssign={handleAssign}
-            onOutput={handleOutput}
-            onAdvance={handleAdvance}
-            onSave={handleSave}
-          />
-        </div>
+        {/* ── Stage body ── */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+          {(() => {
+            const sk = tab;
+            const af = AF[sk], of2 = OF[sk], ot = OT[sk];
+            const assigned = af ? local[af] : null;
+            const output = of2 ? local[of2] : null;
+            const ci = SK.indexOf(local.status), ti = SK.indexOf(sk);
+            const isCur = ti === ci, isPast = ti < ci, isFut = ti > ci;
+            const ns = nextStg(sk);
 
-        {saving && <div style={{ padding: '8px 24px', borderTop: `1px solid ${C.brd}`, fontSize: 12, color: C.acc }}>Guardando...</div>}
+            // For publicado tab
+            if (sk === 'publicado') {
+              return (
+                <div style={{ textAlign: 'center', padding: 40 }}>
+                  {local.status === 'publicado' ? (
+                    <div>
+                      <span style={{ fontSize: 40, display: 'block', marginBottom: 12 }}>✦</span>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: C.teal }}>Publicado</div>
+                      <input placeholder="Link de publicación" value={local.publish_url || ''} onChange={e => set('publish_url', e.target.value)} style={{ ...S.inp, marginTop: 16, maxWidth: 400, margin: '16px auto 0' }} />
+                    </div>
+                  ) : (
+                    <div style={{ color: C.txtM, fontSize: 13 }}>Esta pieza aún no llega a publicación.</div>
+                  )}
+                </div>
+              );
+            }
+
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                {/* Assigned person */}
+                {af && (
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Responsable</div>
+                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                      {team.map(m => {
+                        const sel = assigned === m.username;
+                        const rc = ROLE_COLORS[m.role] || C.txtS;
+                        return (
+                          <button key={m.username} onClick={() => set(af, m.username)} style={{
+                            display: 'flex', alignItems: 'center', gap: 5,
+                            padding: '4px 10px 4px 5px', borderRadius: 16,
+                            background: sel ? `${rc}18` : 'transparent',
+                            border: `1.5px solid ${sel ? rc : C.brd}`,
+                            color: sel ? rc : C.txtM, fontSize: 12, fontWeight: 600,
+                            cursor: 'pointer', fontFamily: 'inherit',
+                          }}>
+                            <Av username={m.username} team={team} size={18} />
+                            {shortName(m)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Output */}
+                {of2 && (
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
+                      Output {isPast && output ? '✓ completado' : isCur ? '— requerido para avanzar' : ''}
+                    </div>
+
+                    {ot === 'url' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <input type="url" placeholder="URL de referencia viral (Instagram, TikTok…)" value={local.research_output || ''} onChange={e => set('research_output', e.target.value)} disabled={isFut} style={{ ...S.inp, opacity: isFut ? .4 : 1 }} />
+                        <textarea placeholder="¿Por qué funciona? Hook, formato, duración, CTA…" value={local.research_comment || ''} onChange={e => set('research_comment', e.target.value)} rows={3} disabled={isFut} style={{ ...S.inp, opacity: isFut ? .4 : 1 }} />
+                      </div>
+                    )}
+                    {ot === 'text' && (
+                      <textarea placeholder={'• Abre con pregunta provocativa\n• Muestra resultado en 3 seg\n• CTA directo'} value={output || ''} rows={7} onChange={e => set(of2, e.target.value)} disabled={isFut} style={{ ...S.inp, opacity: isFut ? .4 : 1, fontFamily: "'DM Mono', monospace", lineHeight: 1.8 }} />
+                    )}
+                    {ot === 'file' && (
+                      output ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: C.card, borderRadius: 8, border: `1px solid ${C.brd}` }}>
+                          <span style={{ fontSize: 20 }}>📎</span>
+                          <span style={{ fontSize: 13, color: C.txt, flex: 1 }}>{output}</span>
+                          {!isFut && <button onClick={() => set(of2, null)} style={{ background: 'none', border: 'none', color: C.red, fontSize: 12, cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit' }}>Quitar</button>}
+                        </div>
+                      ) : (
+                        <label style={{
+                          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8,
+                          padding: '30px 20px', background: C.card, border: `2px dashed ${isFut ? C.brd : C.brdH}`,
+                          borderRadius: 8, cursor: isFut ? 'default' : 'pointer', opacity: isFut ? .4 : 1,
+                          transition: 'border-color .15s',
+                        }}>
+                          <span style={{ fontSize: 28, opacity: .4 }}>📤</span>
+                          <span style={{ fontSize: 12, color: C.txtM }}>{isFut ? 'Pendiente' : 'Clic para subir archivo'}</span>
+                          {!isFut && <input type="file" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) set(of2, f.name); }} />}
+                        </label>
+                      )
+                    )}
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <button onClick={handleSave} style={S.btn(false)}>
+                    {saving ? 'Guardando…' : '💾 Guardar'}
+                  </button>
+                  {isCur && output && ns && (
+                    <button onClick={() => handleAdvance(sk)} style={S.btn(true)}>
+                      Avanzar a {ns.l} →
+                    </button>
+                  )}
+                  {isFut && <span style={{ fontSize: 12, color: C.txtM, fontStyle: 'italic', alignSelf: 'center' }}>Etapa futura</span>}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
       </div>
     </div>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Main Page
+// MAIN PAGE
 // ═══════════════════════════════════════════════════════════════════════════
 export default function PipelinePage() {
   const router = useRouter();
-  const [session, setSessionState] = useState(null);
+  const [session, setSess] = useState(null);
   const [clients, setClients] = useState([]);
-  const [team, setTeamState] = useState([]);
-  const [selectedClient, setSelectedClient] = useState('');
-  const [selectedMonth, setSelectedMonth] = useState(CURRENT_PERIOD);
+  const [team, setTeam] = useState([]);
+  const [selClient, setSelClient] = useState('');
+  const [selMonth, setSelMonth] = useState(CURRENT_PERIOD);
   const [pieces, setPieces] = useState([]);
+  const [pool, setPool] = useState({});
   const [modal, setModal] = useState(null);
+  const [showPool, setShowPool] = useState(true);
   const [isDemo, setIsDemo] = useState(false);
 
+  // Auth
   useEffect(() => {
     const s = getSession();
     if (!s?.user || !isAdmin(s.user)) { router.push('/'); return; }
-    setSessionState(s);
+    setSess(s);
   }, []);
 
-  // Load clients + team once
+  // Load clients + team
   useEffect(() => {
     if (!session) return;
     (async () => {
@@ -403,80 +540,159 @@ export default function PipelinePage() {
       if (!cl.length) { cl = DEMO_CLIENTS; setIsDemo(true); }
       if (!tm.length) tm = DEMO_TEAM;
       setClients(cl);
-      setTeamState(tm);
-      setSelectedClient(cl[0]?.id || '');
+      setTeam(tm);
+      setSelClient(cl[0]?.id || '');
     })();
   }, [session]);
 
-  // Load pieces when client/month changes
+  // Load pieces for selected client/month
   useEffect(() => {
-    if (!selectedClient) return;
+    if (!selClient) return;
     (async () => {
       if (!isDemo) {
         try {
-          const { data } = await supabase.from('content_pieces').select('*').eq('client_id', selectedClient).eq('period', selectedMonth);
+          const { data } = await supabase.from('content_pieces').select('*').eq('client_id', selClient).eq('period', selMonth);
           if (data?.length) { setPieces(data); return; }
         } catch {}
       }
-      setPieces(makeDemoPieces(selectedClient));
+      // No pieces yet — show empty, user will generate
+      setPieces([]);
     })();
-  }, [selectedClient, selectedMonth, isDemo]);
+  }, [selClient, selMonth, isDemo]);
+
+  // Load pool config for client
+  useEffect(() => {
+    if (!selClient) return;
+    (async () => {
+      try {
+        const { data } = await supabase.from('monthly_team').select('pool_config').eq('client_id', selClient).eq('month', selMonth).single();
+        if (data?.pool_config) { setPool(JSON.parse(data.pool_config)); return; }
+      } catch {}
+      // Default empty pool
+      setPool({});
+    })();
+  }, [selClient, selMonth]);
+
+  // Generate pieces with Pepe
+  const handleGenerate = useCallback(() => {
+    const generated = pepeGeneratePieces(selClient, selMonth, pool);
+    // Keep non-pendiente pieces (already in progress), replace pendiente
+    setPieces(prev => {
+      const inProgress = prev.filter(p => p.status !== 'pendiente');
+      return [...inProgress, ...generated];
+    });
+    // Save pool config
+    (async () => {
+      try {
+        await supabase.from('monthly_team').upsert({
+          client_id: selClient, month: selMonth, pool_config: JSON.stringify(pool),
+        });
+      } catch {}
+    })();
+  }, [selClient, selMonth, pool]);
+
+  // Add single piece
+  const handleAddPiece = () => {
+    const newPiece = {
+      id: `new-${Date.now()}`,
+      client_id: selClient, title: 'Nueva pieza', type: 'reel', status: 'pendiente',
+      deadline: `${selMonth}-15`, period: selMonth,
+    };
+    ACTIVE_STAGES.forEach(st => {
+      const stagePool = pool[st.k] || [];
+      newPiece[AF[st.k]] = stagePool.length ? stagePool[0] : null;
+      newPiece[OF[st.k]] = null;
+    });
+    setPieces(prev => [...prev, newPiece]);
+    setModal(newPiece);
+  };
 
   const handleUpdate = useCallback((updated) => {
     setPieces(prev => prev.map(p => p.id === updated.id ? updated : p));
     setModal(updated);
   }, []);
 
+  const handleDelete = useCallback((id) => {
+    setPieces(prev => prev.filter(p => p.id !== id));
+  }, []);
+
   if (!session) return null;
 
   const total = pieces.length;
   const published = pieces.filter(p => p.status === 'publicado').length;
-  const overdueCount = pieces.filter(p => isOverdue(p.deadline) && p.status !== 'publicado').length;
+  const overdueN = pieces.filter(p => isOD(p.deadline) && p.status !== 'publicado').length;
   const pct = total ? Math.round((published / total) * 100) : 0;
   const months = getMonths();
+  const clientColor = clients.find(c => c.id === selClient)?.color || C.acc;
 
   return (
-    <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'DM Sans', sans-serif" }}>
+    <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'DM Sans', sans-serif", display: 'flex', flexDirection: 'column' }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
       <NavHeader />
 
       {/* Toolbar */}
-      <div style={{ padding: '14px 28px', display: 'flex', alignItems: 'center', gap: 14, borderBottom: `1px solid ${C.brd}`, flexWrap: 'wrap' }}>
-        <select value={selectedClient} onChange={e => setSelectedClient(e.target.value)} style={S.sel}>
+      <div style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: `1px solid ${C.brd}`, flexWrap: 'wrap', flexShrink: 0 }}>
+        <button onClick={() => setShowPool(!showPool)} style={{
+          ...S.btn(false), fontSize: 12, padding: '6px 12px',
+          background: showPool ? C.accDim : C.card, color: showPool ? C.acc : C.txtS,
+          border: `1px solid ${showPool ? C.acc + '33' : C.brd}`,
+        }}>
+          👥 Pool
+        </button>
+        <select value={selClient} onChange={e => setSelClient(e.target.value)} style={S.sel}>
           {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} style={S.sel}>
+        <select value={selMonth} onChange={e => setSelMonth(e.target.value)} style={S.sel}>
           {months.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}
         </select>
-        {isDemo && <span style={{ fontSize: 11, color: C.amb, background: C.ambDim, padding: '3px 10px', borderRadius: 8, fontWeight: 600 }}>Demo</span>}
+        <button onClick={handleAddPiece} style={{ ...S.btn(false), fontSize: 12, padding: '6px 12px' }}>+ Pieza</button>
+        {isDemo && <Badge color={C.amb}>Demo</Badge>}
 
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 16, alignItems: 'center' }}>
-          <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: C.wh }}>{total}</div><div style={{ fontSize: 10, color: C.txtM }}>Piezas</div></div>
-          <div style={{ width: 1, height: 24, background: C.brd }} />
-          <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: C.acc }}>{published}</div><div style={{ fontSize: 10, color: C.txtM }}>Publicadas</div></div>
-          {overdueCount > 0 && <>
-            <div style={{ width: 1, height: 24, background: C.brd }} />
-            <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: C.red }}>{overdueCount}</div><div style={{ fontSize: 10, color: C.txtM }}>Atrasadas</div></div>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 14, alignItems: 'center' }}>
+          <div style={{ textAlign: 'center' }}><div style={{ fontSize: 16, fontWeight: 800, color: C.wh }}>{total}</div><div style={{ fontSize: 9, color: C.txtM }}>Piezas</div></div>
+          <div style={{ width: 1, height: 22, background: C.brd }} />
+          <div style={{ textAlign: 'center' }}><div style={{ fontSize: 16, fontWeight: 800, color: C.acc }}>{published}</div><div style={{ fontSize: 9, color: C.txtM }}>Publicadas</div></div>
+          {overdueN > 0 && <>
+            <div style={{ width: 1, height: 22, background: C.brd }} />
+            <div style={{ textAlign: 'center' }}><div style={{ fontSize: 16, fontWeight: 800, color: C.red }}>{overdueN}</div><div style={{ fontSize: 9, color: C.txtM }}>Atrasadas</div></div>
           </>}
+          <div style={{ width: 1, height: 22, background: C.brd }} />
+          <div style={{ flex: '0 0 80px', height: 4, background: C.card, borderRadius: 2, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${pct}%`, background: `linear-gradient(90deg,${C.teal},${C.acc})`, borderRadius: 2, transition: 'width .4s' }} />
+          </div>
+          <span style={{ fontSize: 11, color: C.txtM, fontWeight: 600 }}>{pct}%</span>
         </div>
       </div>
 
-      {/* Progress */}
-      <div style={{ padding: '10px 28px 0', display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div style={{ flex: 1, height: 4, background: C.card, borderRadius: 2, overflow: 'hidden' }}>
-          <div style={{ height: '100%', borderRadius: 2, width: `${pct}%`, background: `linear-gradient(90deg, ${C.teal}, ${C.acc})`, transition: 'width .4s ease' }} />
+      {/* Main area: pool panel + kanban */}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        {showPool && (
+          <PoolPanel
+            pool={pool} setPool={setPool} team={team}
+            clientColor={clientColor} onGenerate={handleGenerate}
+            pieceCount={pieces.length}
+          />
+        )}
+
+        {/* Kanban */}
+        <div style={{ flex: 1, display: 'flex', gap: 8, padding: '12px 16px', overflowX: 'auto', alignItems: 'flex-start' }}>
+          {pieces.length === 0 ? (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 60, color: C.txtM }}>
+              <span style={{ fontSize: 48, opacity: .3 }}>🤖</span>
+              <div style={{ fontSize: 16, fontWeight: 700, color: C.txtS }}>Sin piezas este mes</div>
+              <div style={{ fontSize: 13, textAlign: 'center', maxWidth: 320 }}>
+                Configura el pool del equipo en el panel izquierdo y presiona "Generar piezas del mes" para que Pepe las cree y asigne automáticamente.
+              </div>
+            </div>
+          ) : (
+            KANBAN_COLS.map(s => (
+              <Column key={s.k} stage={s} pieces={pieces.filter(p => p.status === s.k)} onCardClick={setModal} team={team} />
+            ))
+          )}
         </div>
-        <span style={{ fontSize: 11, color: C.txtM, fontWeight: 600 }}>{pct}% completado</span>
       </div>
 
-      {/* Kanban */}
-      <div style={{ display: 'flex', gap: 10, padding: '14px 28px 28px', overflowX: 'auto', alignItems: 'flex-start' }}>
-        {KANBAN_STAGES.map(s => (
-          <KanbanColumn key={s.k} stage={s} pieces={pieces.filter(p => p.status === s.k)} onCardClick={setModal} team={team} />
-        ))}
-      </div>
-
-      {modal && <PieceModal piece={modal} onClose={() => setModal(null)} onUpdate={handleUpdate} team={team} />}
+      {modal && <PieceModal piece={modal} onClose={() => setModal(null)} onUpdate={handleUpdate} onDelete={handleDelete} team={team} />}
     </div>
   );
 }
