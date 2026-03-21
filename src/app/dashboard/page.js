@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
+import NavHeader from '@/components/NavHeader';
 
 // ── Supabase lightweight client ──
 const SUPABASE_URL = "https://fyiukqelspqdvdulczrs.supabase.co";
@@ -270,18 +271,7 @@ export default function Dashboard() {
     <div style={styles.page}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
 
-      {/* Header */}
-      <header style={styles.header}>
-        <div style={styles.headerLeft}>
-          <span style={styles.logo}>e.32o</span>
-          <span style={styles.headerSep}>|</span>
-          <span style={styles.headerTitle}>Dashboard ejecutivo</span>
-        </div>
-        <div style={styles.headerRight}>
-          <span style={styles.headerDate}>{monthName}</span>
-          <div style={styles.avatarSmall}>FA</div>
-        </div>
-      </header>
+       <NavHeader />
 
       <main style={styles.main}>
         {/* KPI Cards */}
