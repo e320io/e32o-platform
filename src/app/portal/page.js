@@ -497,7 +497,7 @@ export default function Portal() {
         setSession({ user: users[0], client: clients[0] || { id: users[0].client_id, name: "Cliente" } });
         return;
       }
-      const demo = { brillo_valle: { id: "c2", name: "Brillo Mío Valle" }, cire: { id: "c1", name: "Cire" }, sandy: { id: "c6", name: "Sandy Arcos" } };
+      const demo = { brillo_valle: { id: "2ef8b0f0-7995-41bc-a18c-f1fb4bcea91f", name: "Brillo Mío Valle" }, cire: { id: "0be9019f-d6c0-499f-9cd3-0632de527a8e", name: "Cire" }, sandy: { id: "76b07069-8808-41f7-8955-1eb3122eeda7", name: "Sandy Arcos" } };
       if (demo[username] && password === "e3202026") { setSession({ user: { username, client_id: demo[username].id }, client: demo[username] }); setUseDemoData(true); return; }
       setLoginError("Usuario o contraseña incorrectos");
     } catch { setLoginError("Error de conexión"); }
