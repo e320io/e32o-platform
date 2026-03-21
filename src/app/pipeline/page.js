@@ -27,28 +27,42 @@ FLOW_FULL.forEach(f => {
 });
 
 // Client plans (mirrors brief)
+// UUID map for clients
+const CID = {
+  cire:      '0be9019f-d6c0-499f-9cd3-0632de527a8e',
+  brillo_v:  '2ef8b0f0-7995-41bc-a18c-f1fb4bcea91f',
+  brillo_sf: '9b1a57b7-bc7e-4920-aade-c00985e6a544',
+  beauty_sj: 'f17e5ae8-bf21-44d2-8664-cc8296f205ec',
+  beauty_bb: 'd6ed65f5-1121-4401-80a7-3058a27f300e',
+  sandy:     '76b07069-8808-41f7-8955-1eb3122eeda7',
+  mariana:   'e8c2e205-b9d7-467d-943e-6654c5566b04',
+  victor:    '0348e262-acac-43a4-bc63-b1d0f33c2009',
+  diveland:  'a808fd04-4692-412b-bb75-73ecd26c0391',
+  iglesia:   '1f067392-0669-484e-a32a-5c21cc3c5f59',
+};
+
 const CLIENT_PLANS = {
-  c1:  { pieces: [{ n: 12, t: 'reel' }, { n: 4, t: 'carrusel' }, { n: 1, t: 'gestion_ads' }], flow: 'full' },
-  c2:  { pieces: [{ n: 12, t: 'reel' }, { n: 4, t: 'fast_reel' }, { n: 4, t: 'carrusel' }, { n: 1, t: 'gestion_ads' }], flow: 'full' },
-  c3:  { pieces: [{ n: 12, t: 'reel' }, { n: 4, t: 'fast_reel' }, { n: 4, t: 'carrusel' }, { n: 1, t: 'gestion_ads' }], flow: 'full' },
-  c4:  { pieces: [{ n: 6, t: 'video' }, { n: 3, t: 'imagen' }, { n: 1, t: 'gestion_ads' }], flow: 'full' },
-  c5:  { pieces: [{ n: 6, t: 'video' }, { n: 3, t: 'imagen' }, { n: 1, t: 'gestion_ads' }], flow: 'full' },
-  c6:  { pieces: [{ n: 4, t: 'episodio_youtube' }, { n: 24, t: 'reel_episodio' }, { n: 6, t: 'reel_individual' }], flow: 'short' },
-  c7:  { pieces: [{ n: 4, t: 'episodio_youtube' }, { n: 8, t: 'reel_grabacion' }, { n: 4, t: 'reel_predica' }, { n: 4, t: 'carrusel' }], flow: 'short' },
-  c8:  { pieces: [{ n: 8, t: 'clip_predica' }], flow: 'short' },
-  c9:  { pieces: [{ n: 4, t: 'reel' }], flow: 'full' },
+  [CID.cire]:      { pieces: [{ n: 12, t: 'reel' }, { n: 4, t: 'carrusel' }, { n: 1, t: 'gestion_ads' }], flow: 'full' },
+  [CID.brillo_v]:  { pieces: [{ n: 12, t: 'reel' }, { n: 4, t: 'fast_reel' }, { n: 4, t: 'carrusel' }, { n: 1, t: 'gestion_ads' }], flow: 'full' },
+  [CID.brillo_sf]: { pieces: [{ n: 12, t: 'reel' }, { n: 4, t: 'fast_reel' }, { n: 4, t: 'carrusel' }, { n: 1, t: 'gestion_ads' }], flow: 'full' },
+  [CID.beauty_sj]: { pieces: [{ n: 6, t: 'video' }, { n: 3, t: 'imagen' }, { n: 1, t: 'gestion_ads' }], flow: 'full' },
+  [CID.beauty_bb]: { pieces: [{ n: 6, t: 'video' }, { n: 3, t: 'imagen' }, { n: 1, t: 'gestion_ads' }], flow: 'full' },
+  [CID.sandy]:     { pieces: [{ n: 4, t: 'episodio_youtube' }, { n: 24, t: 'reel_episodio' }, { n: 6, t: 'reel_individual' }], flow: 'short' },
+  [CID.mariana]:   { pieces: [{ n: 4, t: 'episodio_youtube' }, { n: 8, t: 'reel_grabacion' }, { n: 4, t: 'reel_predica' }, { n: 4, t: 'carrusel' }], flow: 'short' },
+  [CID.victor]:    { pieces: [{ n: 8, t: 'clip_predica' }], flow: 'short' },
+  [CID.diveland]:  { pieces: [{ n: 4, t: 'reel' }], flow: 'full' },
 };
 
 const DEMO_CLIENTS = [
-  { id: 'c1', name: 'Cire', color: '#B8F03E' },
-  { id: 'c2', name: 'Brillo Mío Valle', color: '#3EF0C8' },
-  { id: 'c3', name: 'Brillo Mío Santa Fe', color: '#3EB8F0' },
-  { id: 'c4', name: 'Beauty Design SJ', color: '#F0A03E' },
-  { id: 'c5', name: 'Beauty Design Barbería', color: '#F03E7A' },
-  { id: 'c6', name: 'Sandy Arcos', color: '#C83EF0' },
-  { id: 'c7', name: 'Profeta Mariana', color: '#F0E03E' },
-  { id: 'c8', name: 'Apóstol Víctor', color: '#3EF06A' },
-  { id: 'c9', name: 'Diveland', color: '#F07A3E' },
+  { id: CID.cire, name: 'Cire', color: '#B8F03E' },
+  { id: CID.brillo_v, name: 'Brillo Mío Valle', color: '#3EF0C8' },
+  { id: CID.brillo_sf, name: 'Brillo Mío Santa Fe', color: '#3EB8F0' },
+  { id: CID.beauty_sj, name: 'Beauty Design SJ', color: '#F0A03E' },
+  { id: CID.beauty_bb, name: 'Beauty Design Barbería', color: '#F03E7A' },
+  { id: CID.sandy, name: 'Sandy Arcos', color: '#C83EF0' },
+  { id: CID.mariana, name: 'Profeta Mariana', color: '#F0E03E' },
+  { id: CID.victor, name: 'Apóstol Víctor', color: '#3EF06A' },
+  { id: CID.diveland, name: 'Develand', color: '#F07A3E' },
 ];
 const DEMO_TEAM = [
   { username: 'fer_ayala', display_name: 'Fer Ayala', role: 'founder' },
