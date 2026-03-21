@@ -1,153 +1,74 @@
 "use client";
-
 import { useState, useEffect, useCallback, useMemo } from "react";
 
 // ============================================================
-// e.32o — Portal del Cliente (/portal)
+// e.32o — Portal del Cliente (/portal) v2
+// Clickable calendar, file preview, progress bar, payment reminder
 // ============================================================
-// Supabase config
-const SUPABASE_URL = "https://fyiukqelspqdvdulczrs.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ5aXVrcWVsc3BxZHZkdWxjenJzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4NzUwMDAsImV4cCI6MjA4OTQ1MTAwMH0.HsZdGoLGCIbKcv3ytWTyjYrWeQ5yRJsp7O1Cj9lWO3g";
 
-// Supabase REST helper
-async function supabaseRest(table, params = {}) {
+const SUPABASE_URL = "https://fyiukqelspqdvdulczrs.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ5aXVrcWVsc3BxZHZkdWxjenJzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4NzUwMDAsImV4cCI6MjA4OTQ1MTAwMH0.HsZdGoLGCIbKcv3ytWTyjYrWeQ5yRJsp7O1Cj9lWO3g";
+
+async function sbRest(table, params = {}) {
   const { select = "*", filters = [], order, limit } = params;
   let url = `${SUPABASE_URL}/rest/v1/${table}?select=${encodeURIComponent(select)}`;
-  filters.forEach(([col, op, val]) => {
-    url += `&${col}=${op}.${encodeURIComponent(val)}`;
-  });
+  filters.forEach(([col, op, val]) => { url += `&${col}=${op}.${encodeURIComponent(val)}`; });
   if (order) url += `&order=${order}`;
   if (limit) url += `&limit=${limit}`;
-  const res = await fetch(url, {
-    headers: {
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-      "Content-Type": "application/json",
-    },
-  });
-  if (!res.ok) throw new Error(`Supabase ${table}: ${res.status}`);
+  const res = await fetch(url, { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, "Content-Type": "application/json" } });
+  if (!res.ok) throw new Error(`${table}: ${res.status}`);
   return res.json();
 }
 
-// RPC call helper
-async function supabaseRpc(fn, body = {}) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
-    method: "POST",
-    headers: {
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`RPC ${fn}: ${res.status}`);
-  return res.json();
-}
-
-// PATCH helper for updating pieces
-async function supabasePatch(table, id, body) {
-  const url = `${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`;
-  const res = await fetch(url, {
+async function sbPatch(table, id, body) {
+  await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, {
     method: "PATCH",
-    headers: {
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-      "Content-Type": "application/json",
-      Prefer: "return=minimal",
-    },
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`PATCH ${table}: ${res.status}`);
 }
 
-// ============================================================
-// Design tokens
-// ============================================================
+// ── Tokens ──
 const T = {
-  bg: "#0A0A0A",
-  card: "#111111",
-  cardHover: "#161616",
-  border: "#1E1E1E",
-  borderLight: "#2A2A2A",
-  accent: "#B8F03E",
-  accentDim: "rgba(184,240,62,0.12)",
-  accentGlow: "rgba(184,240,62,0.25)",
-  yellow: "#F0E03E",
-  yellowDim: "rgba(240,224,62,0.12)",
-  red: "#FF6B6B",
-  redDim: "rgba(255,107,107,0.12)",
-  blue: "#6BB3FF",
-  blueDim: "rgba(107,179,255,0.12)",
-  text: "#F5F5F5",
-  textMuted: "#888888",
-  textDim: "#555555",
-  radius: "12px",
-  radiusSm: "8px",
-  radiusXs: "6px",
-  font: "'DM Sans', 'Segoe UI', system-ui, sans-serif",
-  fontMono: "'JetBrains Mono', 'Fira Code', monospace",
+  bg: "#0A0A0A", card: "#111111", cardH: "#161616",
+  brd: "#1E1E1E", brdL: "#2A2A2A",
+  acc: "#B8F03E", accDim: "rgba(184,240,62,0.12)",
+  yel: "#F0E03E", yelDim: "rgba(240,224,62,0.12)",
+  red: "#FF6B6B", redDim: "rgba(255,107,107,0.12)",
+  blue: "#6BB3FF", blueDim: "rgba(107,179,255,0.12)",
+  txt: "#F5F5F5", txtM: "#888888", txtD: "#555555",
+  r: "12px", rS: "8px", rX: "6px",
+  f: "'DM Sans', system-ui, sans-serif",
 };
 
-// ============================================================
-// Demo data for when Supabase tables don't exist yet
-// ============================================================
-const DEMO_PIECES_REVIEW = [
-  {
-    id: "demo-1",
-    title: "Transformación capilar — Balayage natural",
-    type: "reel",
-    status: "aprobacion_cliente",
-    research_url: "https://www.instagram.com/reel/example1",
-    script_body:
-      "• Hook: '¿Sabías que el balayage puede verse natural?'\n• Mostrar antes y después\n• Explicar técnica de mano alzada\n• CTA: Agenda tu cita hoy",
-    scheduled_date: "2026-04-05",
-  },
-  {
-    id: "demo-2",
-    title: "Tips de cuidado post-tratamiento",
-    type: "carrusel",
-    status: "aprobacion_cliente",
-    research_url: "https://www.instagram.com/p/example2",
-    script_body:
-      "• Slide 1: '5 errores que arruinan tu tratamiento'\n• Slide 2: No lavar en 48hrs\n• Slide 3: Evitar plancha la primera semana\n• Slide 4: Usar shampoo sin sulfatos\n• Slide 5: CTA — Pregúntanos por WhatsApp",
-    scheduled_date: "2026-04-08",
-  },
-  {
-    id: "demo-3",
-    title: "Promo Abril — 2x1 en mechas",
-    type: "reel",
-    status: "aprobacion_cliente",
-    research_url: null,
-    script_body:
-      "• Hook visual: transición de cabello opaco a brillante\n• Texto en pantalla con la promo\n• Testimonial de clienta real\n• CTA con link en bio",
-    scheduled_date: "2026-04-12",
-  },
-];
-
-const DEMO_PIECES_CALENDAR = [
-  { id: "c1", title: "Reel — Transformación balayage", type: "reel", status: "publicado", scheduled_date: "2026-03-03" },
-  { id: "c2", title: "Carrusel — Cuidado capilar", type: "carrusel", status: "publicado", scheduled_date: "2026-03-05" },
-  { id: "c3", title: "Reel — Tendencia primavera", type: "reel", status: "publicado", scheduled_date: "2026-03-07" },
-  { id: "c4", title: "Fast reel — Antes/después", type: "fast_reel", status: "publicado", scheduled_date: "2026-03-10" },
-  { id: "c5", title: "Reel — Color fantasía", type: "reel", status: "publicado", scheduled_date: "2026-03-12" },
-  { id: "c6", title: "Carrusel — Preguntas frecuentes", type: "carrusel", status: "publicado", scheduled_date: "2026-03-14" },
-  { id: "c7", title: "Reel — Keratin treatment", type: "reel", status: "listo", scheduled_date: "2026-03-19" },
-  { id: "c8", title: "Reel — Corte bob moderno", type: "reel", status: "listo", scheduled_date: "2026-03-21" },
-  { id: "c9", title: "Carrusel — Abril trends", type: "carrusel", status: "edicion", scheduled_date: "2026-03-24" },
-  { id: "c10", title: "Reel — Decoloración segura", type: "reel", status: "edicion", scheduled_date: "2026-03-26" },
-  { id: "c11", title: "Fast reel — Quick styling", type: "fast_reel", status: "grabacion", scheduled_date: "2026-03-28" },
-  { id: "c12", title: "Reel — Promo abril", type: "reel", status: "aprobacion_cliente", scheduled_date: "2026-04-02" },
+// ── Demo data ──
+const DEMO_PIECES = [
+  { id: "d1", title: "Reel — Transformación balayage", type: "reel", status: "publicado", scheduled_date: "2026-03-03", edicion_output: "reel_balayage_final.mp4", publish_url: "https://instagram.com/reel/abc123" },
+  { id: "d2", title: "Carrusel — Cuidado capilar", type: "carrusel", status: "publicado", scheduled_date: "2026-03-05", edicion_output: "carrusel_cuidado.pdf" },
+  { id: "d3", title: "Reel — Tendencia primavera", type: "reel", status: "publicado", scheduled_date: "2026-03-07", edicion_output: "reel_primavera.mp4" },
+  { id: "d4", title: "Fast reel — Antes/después", type: "fast_reel", status: "publicado", scheduled_date: "2026-03-10", edicion_output: "fast_antes_despues.mp4" },
+  { id: "d5", title: "Reel — Color fantasía", type: "reel", status: "publicado", scheduled_date: "2026-03-12", edicion_output: "reel_fantasia.mp4" },
+  { id: "d6", title: "Carrusel — Preguntas frecuentes", type: "carrusel", status: "publicado", scheduled_date: "2026-03-14", edicion_output: "carrusel_faq.pdf" },
+  { id: "d7", title: "Reel — Keratin treatment", type: "reel", status: "revision_cliente", scheduled_date: "2026-03-19", edicion_output: "reel_keratin_v2.mp4", guion_output: "• Hook: ¿Tu cabello se esponja?\n• Mostrar proceso keratin\n• Resultado 72hrs después\n• CTA: Agenda hoy" },
+  { id: "d8", title: "Reel — Corte bob moderno", type: "reel", status: "revision_cliente", scheduled_date: "2026-03-21", edicion_output: "reel_bob_edit.mp4", guion_output: "• Tendencia: bob francés\n• Transición antes/después\n• Tips de styling\n• CTA" },
+  { id: "d9", title: "Carrusel — Abril trends", type: "carrusel", status: "edicion", scheduled_date: "2026-03-24", edicion_output: null },
+  { id: "d10", title: "Reel — Decoloración segura", type: "reel", status: "edicion", scheduled_date: "2026-03-26", edicion_output: null },
+  { id: "d11", title: "Fast reel — Quick styling", type: "fast_reel", status: "grabacion", scheduled_date: "2026-03-28", edicion_output: null },
+  { id: "d12", title: "Reel — Promo abril", type: "reel", status: "revision_cliente", scheduled_date: "2026-04-02", edicion_output: "reel_promo_abril.mp4", guion_output: "• Hook visual: transición cabello\n• Promo 2x1 mechas\n• Testimonial real\n• CTA link en bio", research_output: "https://instagram.com/reel/ref456" },
+  { id: "d13", title: "Reel — Mechas miel", type: "reel", status: "guion", scheduled_date: "2026-04-05", edicion_output: null },
+  { id: "d14", title: "Carrusel — Tips post-color", type: "carrusel", status: "research", scheduled_date: "2026-04-08", edicion_output: null },
+  { id: "d15", title: "Fast reel — Blow dry", type: "fast_reel", status: "pendiente", scheduled_date: "2026-04-10", edicion_output: null },
+  { id: "d16", title: "Reel — Hidratación profunda", type: "reel", status: "pendiente", scheduled_date: "2026-04-12", edicion_output: null },
+  { id: "d17", title: "Carrusel — Errores tinte", type: "carrusel", status: "pendiente", scheduled_date: "2026-04-15", edicion_output: null },
+  { id: "d18", title: "Ad — Conversión WhatsApp", type: "gestion_ads", status: "edicion", scheduled_date: "2026-04-01", edicion_output: null },
+  { id: "d19", title: "Reel — Ombre tutorial", type: "reel", status: "grabacion", scheduled_date: "2026-04-07", edicion_output: null },
+  { id: "d20", title: "Fast reel — Peinado express", type: "fast_reel", status: "aprobacion", scheduled_date: "2026-04-09", edicion_output: null },
+  { id: "d21", title: "Reel — Cliente feliz mayo", type: "reel", status: "pendiente", scheduled_date: "2026-04-18", edicion_output: null },
 ];
 
 const DEMO_AD_METRICS = {
-  spend: 12450,
-  impressions: 284300,
-  clicks: 4870,
-  ctr: 1.71,
-  conversions: 127,
-  cpc: 2.56,
-  roas: 3.8,
+  spend: 12450, impressions: 284300, clicks: 4870, ctr: 1.71,
+  conversions: 127, cpc: 2.56, roas: 3.8,
   campaigns: [
     { name: "Promo Marzo — 2x1 Mechas", status: "active", spend: 5200, impressions: 128000, clicks: 2150, conversions: 58 },
     { name: "Branding — Experiencia Salón", status: "active", spend: 4100, impressions: 98000, clicks: 1620, conversions: 42 },
@@ -155,417 +76,259 @@ const DEMO_AD_METRICS = {
   ],
 };
 
-const DEMO_CLIENT = {
-  id: "demo-client",
-  name: "Brillo Mío Valle",
-  plan_name: "Contenido + Ads",
-  monthly_amount: 6000,
-  has_ads: true,
-};
-
-// Clients with ads
 const ADS_CLIENTS = ["cire", "brillo_mio_valle", "brillo_mio_santa_fe", "beauty_design_san_jeronimo", "beauty_design_barberia", "sandy_arcos"];
 
-// ============================================================
-// Icons (inline SVG components)
-// ============================================================
-const Icon = {
-  Eye: () => (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  ),
-  Check: () => (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  ),
-  X: () => (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
-  ),
-  Calendar: () => (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-      <line x1="16" y1="2" x2="16" y2="6" />
-      <line x1="8" y1="2" x2="8" y2="6" />
-      <line x1="3" y1="10" x2="21" y2="10" />
-    </svg>
-  ),
-  BarChart: () => (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="20" x2="18" y2="10" />
-      <line x1="12" y1="20" x2="12" y2="4" />
-      <line x1="6" y1="20" x2="6" y2="14" />
-    </svg>
-  ),
-  FileText: () => (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-      <line x1="16" y1="13" x2="8" y2="13" />
-      <line x1="16" y1="17" x2="8" y2="17" />
-    </svg>
-  ),
-  ExternalLink: () => (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-      <polyline points="15 3 21 3 21 9" />
-      <line x1="10" y1="14" x2="21" y2="3" />
-    </svg>
-  ),
-  ChevronLeft: () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="15 18 9 12 15 6" />
-    </svg>
-  ),
-  ChevronRight: () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="9 18 15 12 9 6" />
-    </svg>
-  ),
-  Lock: () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-    </svg>
-  ),
-  LogOut: () => (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-      <polyline points="16 17 21 12 16 7" />
-      <line x1="21" y1="12" x2="9" y2="12" />
-    </svg>
-  ),
-  MessageCircle: () => (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-    </svg>
-  ),
-  TrendingUp: () => (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-      <polyline points="17 6 23 6 23 12" />
-    </svg>
-  ),
-};
+// ── Labels/Colors ──
+const typeL = { reel: "Reel", carrusel: "Carrusel", fast_reel: "Fast Reel", imagen: "Imagen", video: "Video", gestion_ads: "Ad" };
+const typeC = { reel: T.acc, carrusel: T.blue, fast_reel: T.yel, imagen: "#C084FC", video: T.acc, gestion_ads: "#EF9F27" };
+const statusL = { pendiente: "Pendiente", research: "Research", guion: "Guión", aprobacion: "Aprobación", grabacion: "Grabación", edicion: "Edición", revision_cliente: "Tu revisión", publicado: "Publicado" };
+const statusC = { pendiente: T.txtD, research: T.txtD, guion: T.txtM, aprobacion: T.yel, grabacion: T.blue, edicion: T.blue, revision_cliente: T.yel, publicado: T.acc };
+
+function fmtDate(d) { if (!d) return "—"; return new Date(d + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "short" }); }
+function fmtNum(n) { return n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : String(n); }
+
+// Is file a video?
+function isVideo(f) { if (!f) return false; return /\.(mp4|mov|webm|avi|mkv)$/i.test(f); }
+function isImage(f) { if (!f) return false; return /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(f); }
 
 // ============================================================
-// Utility functions
-// ============================================================
-const typeLabels = { reel: "Reel", carrusel: "Carrusel", fast_reel: "Fast Reel", imagen: "Imagen", video: "Video", episodio: "Episodio", clip: "Clip" };
-const typeColors = { reel: T.accent, carrusel: T.blue, fast_reel: T.yellow, imagen: "#C084FC", video: T.accent, episodio: T.blue, clip: T.yellow };
-
-const statusLabels = {
-  research: "Research", guion: "Guión", aprobacion: "Aprobación interna", aprobacion_cliente: "Tu revisión",
-  grabacion: "Grabación", edicion: "Edición", revision_cliente: "Revisión", listo: "Listo", publicado: "Publicado",
-};
-const statusColors = {
-  research: T.textDim, guion: T.textMuted, aprobacion: T.yellow, aprobacion_cliente: T.yellow,
-  grabacion: T.blue, edicion: T.blue, revision_cliente: T.yellow, listo: T.accent, publicado: T.accent,
-};
-
-function formatDate(dateStr) {
-  if (!dateStr) return "—";
-  const d = new Date(dateStr + "T12:00:00");
-  return d.toLocaleDateString("es-MX", { day: "numeric", month: "short" });
-}
-
-function formatNumber(n) {
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
-  if (n >= 1000) return (n / 1000).toFixed(1) + "K";
-  return n.toString();
-}
-
-// ============================================================
-// LOGIN SCREEN
+// LOGIN (only shows if no centralized session)
 // ============================================================
 function LoginScreen({ onLogin, error, loading }) {
-  const [user, setUser] = useState("");
-  const [pass, setPass] = useState("");
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onLogin(user, pass);
-  };
-
+  const [user, setUser] = useState(""); const [pass, setPass] = useState("");
   return (
-    <div style={{
-      minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
-      background: T.bg, fontFamily: T.font, padding: "20px",
-    }}>
-      <div style={{
-        width: "100%", maxWidth: "400px", display: "flex", flexDirection: "column", gap: "32px",
-      }}>
-        {/* Logo */}
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: T.bg, fontFamily: T.f, padding: 20 }}>
+      <div style={{ width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", gap: 32 }}>
         <div style={{ textAlign: "center" }}>
-          <div style={{
-            fontSize: "36px", fontWeight: 800, color: T.text, letterSpacing: "-1.5px",
-            marginBottom: "8px",
-          }}>
-            e<span style={{ color: T.accent }}>.</span>32o
-          </div>
-          <div style={{ fontSize: "13px", color: T.textMuted, letterSpacing: "2px", textTransform: "uppercase" }}>
-            Portal de cliente
-          </div>
+          <div style={{ fontSize: 36, fontWeight: 800, color: T.txt, letterSpacing: "-1.5px", marginBottom: 8 }}>e<span style={{ color: T.acc }}>.</span>32o</div>
+          <div style={{ fontSize: 13, color: T.txtM, letterSpacing: "2px", textTransform: "uppercase" }}>Portal de cliente</div>
         </div>
-
-        {/* Card */}
-        <form onSubmit={handleSubmit} style={{
-          background: T.card, border: `1px solid ${T.border}`, borderRadius: T.radius,
-          padding: "32px", display: "flex", flexDirection: "column", gap: "20px",
-        }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            <label style={{ fontSize: "12px", color: T.textMuted, fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>
-              Usuario
-            </label>
-            <input
-              type="text" value={user} onChange={(e) => setUser(e.target.value)}
-              placeholder="tu_usuario"
-              style={{
-                background: T.bg, border: `1px solid ${T.borderLight}`, borderRadius: T.radiusSm,
-                padding: "12px 14px", color: T.text, fontSize: "15px", fontFamily: T.font,
-                outline: "none", transition: "border-color 0.2s",
-              }}
-              onFocus={(e) => (e.target.style.borderColor = T.accent)}
-              onBlur={(e) => (e.target.style.borderColor = T.borderLight)}
-            />
+        <form onSubmit={e => { e.preventDefault(); onLogin(user, pass); }} style={{ background: T.card, border: `1px solid ${T.brd}`, borderRadius: T.r, padding: 32, display: "flex", flexDirection: "column", gap: 20 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={{ fontSize: 12, color: T.txtM, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px" }}>Usuario</label>
+            <input value={user} onChange={e => setUser(e.target.value)} placeholder="tu_usuario" style={{ background: T.bg, border: `1px solid ${T.brdL}`, borderRadius: T.rS, padding: "12px 14px", color: T.txt, fontSize: 15, fontFamily: T.f, outline: "none" }} />
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            <label style={{ fontSize: "12px", color: T.textMuted, fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase" }}>
-              Contraseña
-            </label>
-            <input
-              type="password" value={pass} onChange={(e) => setPass(e.target.value)}
-              placeholder="••••••••"
-              style={{
-                background: T.bg, border: `1px solid ${T.borderLight}`, borderRadius: T.radiusSm,
-                padding: "12px 14px", color: T.text, fontSize: "15px", fontFamily: T.font,
-                outline: "none", transition: "border-color 0.2s",
-              }}
-              onFocus={(e) => (e.target.style.borderColor = T.accent)}
-              onBlur={(e) => (e.target.style.borderColor = T.borderLight)}
-            />
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={{ fontSize: 12, color: T.txtM, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".5px" }}>Contraseña</label>
+            <input type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder="••••••••" style={{ background: T.bg, border: `1px solid ${T.brdL}`, borderRadius: T.rS, padding: "12px 14px", color: T.txt, fontSize: 15, fontFamily: T.f, outline: "none" }} />
           </div>
-
-          {error && (
-            <div style={{
-              background: T.redDim, border: `1px solid rgba(255,107,107,0.3)`, borderRadius: T.radiusXs,
-              padding: "10px 14px", fontSize: "13px", color: T.red,
-            }}>
-              {error}
-            </div>
-          )}
-
-          <button
-            type="submit" disabled={loading || !user || !pass}
-            style={{
-              background: T.accent, color: "#0A0A0A", border: "none", borderRadius: T.radiusSm,
-              padding: "13px", fontSize: "14px", fontWeight: 700, fontFamily: T.font,
-              cursor: loading ? "wait" : "pointer", opacity: loading || !user || !pass ? 0.5 : 1,
-              transition: "opacity 0.2s, transform 0.1s", letterSpacing: "0.3px",
-            }}
-          >
+          {error && <div style={{ background: T.redDim, border: `1px solid ${T.red}33`, borderRadius: T.rX, padding: "10px 14px", fontSize: 13, color: T.red }}>{error}</div>}
+          <button type="submit" disabled={loading || !user || !pass} style={{ background: T.acc, color: "#0A0A0A", border: "none", borderRadius: T.rS, padding: 13, fontSize: 14, fontWeight: 700, fontFamily: T.f, cursor: "pointer", opacity: loading || !user || !pass ? .5 : 1 }}>
             {loading ? "Verificando..." : "Iniciar sesión"}
           </button>
         </form>
-
-        <div style={{ textAlign: "center", fontSize: "12px", color: T.textDim }}>
-          <Icon.Lock /> Acceso exclusivo para clientes
-        </div>
       </div>
     </div>
   );
 }
 
 // ============================================================
-// REVIEW SECTION — Ideas pending client approval
+// PIECE DETAIL MODAL — clickable from calendar
 // ============================================================
-function ReviewSection({ pieces, onApprove, onRequestChanges, feedbackPiece, setFeedbackPiece, feedbackText, setFeedbackText }) {
-  if (pieces.length === 0) {
-    return (
-      <div style={{
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        padding: "80px 20px", gap: "16px",
-      }}>
-        <div style={{ fontSize: "48px", opacity: 0.3 }}>
-          <Icon.Check />
-        </div>
-        <div style={{ fontSize: "18px", fontWeight: 600, color: T.text }}>Todo al día</div>
-        <div style={{ fontSize: "14px", color: T.textMuted, textAlign: "center", maxWidth: "300px" }}>
-          No hay ideas pendientes de tu revisión. Te notificaremos cuando haya nuevas propuestas.
-        </div>
-      </div>
-    );
-  }
+function PieceModal({ piece, onClose, onApprove, onRequestChanges }) {
+  const [feedback, setFeedback] = useState("");
+  const [showFeedback, setShowFeedback] = useState(false);
+  const tc = typeC[piece.type] || T.acc;
+  const sc = statusC[piece.status] || T.txtD;
+  const file = piece.edicion_output || piece.grabacion_output;
+  const isRev = piece.status === "revision_cliente";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-      <div style={{ fontSize: "13px", color: T.textMuted, padding: "0 4px" }}>
-        {pieces.length} {pieces.length === 1 ? "pieza pendiente" : "piezas pendientes"} de tu aprobación
-      </div>
-
-      {pieces.map((piece) => (
-        <div key={piece.id} style={{
-          background: T.card, border: `1px solid ${T.border}`, borderRadius: T.radius,
-          overflow: "hidden", transition: "border-color 0.2s",
-        }}>
-          {/* Header */}
-          <div style={{
-            padding: "18px 20px 14px", display: "flex", alignItems: "flex-start",
-            justifyContent: "space-between", gap: "12px",
-          }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", flexWrap: "wrap" }}>
-                <span style={{
-                  fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px",
-                  color: typeColors[piece.type] || T.accent,
-                  background: `${typeColors[piece.type] || T.accent}15`,
-                  padding: "3px 8px", borderRadius: "4px",
-                }}>
-                  {typeLabels[piece.type] || piece.type}
-                </span>
-                {piece.scheduled_date && (
-                  <span style={{ fontSize: "12px", color: T.textMuted }}>
-                    {formatDate(piece.scheduled_date)}
-                  </span>
-                )}
-              </div>
-              <div style={{ fontSize: "16px", fontWeight: 600, color: T.text, lineHeight: 1.3 }}>
-                {piece.title}
-              </div>
-            </div>
-          </div>
-
-          {/* Reference URL */}
-          {piece.research_url && (
-            <div style={{ padding: "0 20px 12px" }}>
-              <a
-                href={piece.research_url} target="_blank" rel="noopener noreferrer"
-                style={{
-                  display: "inline-flex", alignItems: "center", gap: "6px",
-                  fontSize: "13px", color: T.accent, textDecoration: "none",
-                  padding: "6px 12px", background: T.accentDim, borderRadius: T.radiusXs,
-                  transition: "background 0.2s",
-                }}
-              >
-                <Icon.ExternalLink /> Ver referencia
-              </a>
-            </div>
-          )}
-
-          {/* Script */}
-          {piece.script_body && (
-            <div style={{
-              margin: "0 20px 16px", padding: "14px 16px", background: T.bg,
-              borderRadius: T.radiusSm, border: `1px solid ${T.border}`,
-            }}>
-              <div style={{
-                fontSize: "11px", fontWeight: 700, color: T.textMuted, letterSpacing: "0.8px",
-                textTransform: "uppercase", marginBottom: "8px",
-              }}>
-                Guión
-              </div>
-              <pre style={{
-                fontSize: "13px", color: T.text, lineHeight: 1.7, whiteSpace: "pre-wrap",
-                fontFamily: T.font, margin: 0,
-              }}>
-                {piece.script_body}
-              </pre>
-            </div>
-          )}
-
-          {/* Actions */}
-          <div style={{
-            padding: "14px 20px", borderTop: `1px solid ${T.border}`,
-            display: "flex", gap: "10px", flexWrap: "wrap",
-          }}>
-            {feedbackPiece === piece.id ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px", width: "100%" }}>
-                <textarea
-                  value={feedbackText} onChange={(e) => setFeedbackText(e.target.value)}
-                  placeholder="Escribe tu comentario o sugerencia de cambio..."
-                  rows={3}
-                  style={{
-                    background: T.bg, border: `1px solid ${T.borderLight}`, borderRadius: T.radiusSm,
-                    padding: "10px 12px", color: T.text, fontSize: "13px", fontFamily: T.font,
-                    resize: "vertical", outline: "none", width: "100%", boxSizing: "border-box",
-                  }}
-                  autoFocus
-                />
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <button
-                    onClick={() => { onRequestChanges(piece.id, feedbackText); setFeedbackPiece(null); setFeedbackText(""); }}
-                    disabled={!feedbackText.trim()}
-                    style={{
-                      background: T.yellow, color: "#0A0A0A", border: "none", borderRadius: T.radiusXs,
-                      padding: "8px 16px", fontSize: "13px", fontWeight: 700, fontFamily: T.font,
-                      cursor: "pointer", opacity: !feedbackText.trim() ? 0.4 : 1,
-                    }}
-                  >
-                    Enviar cambios
-                  </button>
-                  <button
-                    onClick={() => { setFeedbackPiece(null); setFeedbackText(""); }}
-                    style={{
-                      background: "transparent", color: T.textMuted, border: `1px solid ${T.borderLight}`,
-                      borderRadius: T.radiusXs, padding: "8px 16px", fontSize: "13px", fontFamily: T.font, cursor: "pointer",
-                    }}
-                  >
-                    Cancelar
-                  </button>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,.75)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: T.card, borderRadius: 16, border: `1px solid ${T.brdL}`, width: "100%", maxWidth: 600, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,.5)", overflow: "hidden" }}>
+        {/* File preview area */}
+        <div style={{ background: T.bg, borderBottom: `1px solid ${T.brd}`, minHeight: 200, display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+          {file && isVideo(file) ? (
+            <div style={{ width: "100%", padding: "20px", textAlign: "center" }}>
+              <div style={{ background: "#000", borderRadius: 8, overflow: "hidden", maxWidth: 480, margin: "0 auto", aspectRatio: "9/16", maxHeight: 320, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, color: T.txtM }}>
+                  <span style={{ fontSize: 48, opacity: .4 }}>▶</span>
+                  <span style={{ fontSize: 12 }}>{file}</span>
+                  <span style={{ fontSize: 11, color: T.txtD }}>Preview disponible con Supabase Storage</span>
                 </div>
               </div>
-            ) : (
-              <>
-                <button
-                  onClick={() => onApprove(piece.id)}
-                  style={{
-                    display: "flex", alignItems: "center", gap: "6px",
-                    background: T.accent, color: "#0A0A0A", border: "none", borderRadius: T.radiusXs,
-                    padding: "9px 18px", fontSize: "13px", fontWeight: 700, fontFamily: T.font, cursor: "pointer",
-                    transition: "transform 0.1s",
-                  }}
-                >
-                  <Icon.Check /> Aprobar
-                </button>
-                <button
-                  onClick={() => setFeedbackPiece(piece.id)}
-                  style={{
-                    display: "flex", alignItems: "center", gap: "6px",
-                    background: "transparent", color: T.yellow, border: `1px solid ${T.yellow}40`,
-                    borderRadius: T.radiusXs, padding: "9px 18px", fontSize: "13px", fontWeight: 600,
-                    fontFamily: T.font, cursor: "pointer",
-                  }}
-                >
-                  <Icon.MessageCircle /> Pedir cambios
-                </button>
-              </>
-            )}
+            </div>
+          ) : file && isImage(file) ? (
+            <div style={{ width: "100%", padding: 20, textAlign: "center" }}>
+              <div style={{ background: "#080808", borderRadius: 8, padding: 40, display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 48, opacity: .4 }}>🖼</span>
+                <span style={{ fontSize: 12, color: T.txtM }}>{file}</span>
+              </div>
+            </div>
+          ) : file ? (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: 40 }}>
+              <span style={{ fontSize: 36, opacity: .4 }}>📎</span>
+              <span style={{ fontSize: 13, color: T.txtM }}>{file}</span>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: 40, color: T.txtD }}>
+              <span style={{ fontSize: 36, opacity: .3 }}>⏳</span>
+              <span style={{ fontSize: 13 }}>Archivo en preparación</span>
+              <span style={{ fontSize: 11 }}>{statusL[piece.status] || piece.status}</span>
+            </div>
+          )}
+          {/* Status badge overlay */}
+          <div style={{ position: "absolute", top: 12, right: 12, display: "flex", gap: 6 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 20, background: `${sc}18`, color: sc, textTransform: "uppercase", letterSpacing: ".5px" }}>{statusL[piece.status]}</span>
           </div>
+          <button onClick={onClose} style={{ position: "absolute", top: 12, left: 12, background: "rgba(0,0,0,.5)", border: "none", color: "#fff", width: 32, height: 32, borderRadius: "50%", fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
         </div>
-      ))}
+
+        {/* Info */}
+        <div style={{ padding: "18px 22px", flex: 1, overflowY: "auto" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: `${tc}15`, color: tc, textTransform: "uppercase", letterSpacing: ".5px" }}>{typeL[piece.type] || piece.type}</span>
+            <span style={{ fontSize: 12, color: T.txtM }}>{fmtDate(piece.scheduled_date)}</span>
+          </div>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: T.txt, margin: "0 0 12px", lineHeight: 1.3 }}>{piece.title}</h2>
+
+          {/* Script/guión if available */}
+          {piece.guion_output && (
+            <div style={{ background: T.bg, border: `1px solid ${T.brd}`, borderRadius: T.rS, padding: "14px 16px", marginBottom: 12 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: T.txtM, textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 8 }}>Guión</div>
+              <pre style={{ fontSize: 13, color: T.txt, lineHeight: 1.7, whiteSpace: "pre-wrap", fontFamily: T.f, margin: 0 }}>{piece.guion_output}</pre>
+            </div>
+          )}
+
+          {/* Reference URL */}
+          {piece.research_output && (
+            <a href={piece.research_output} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: T.acc, textDecoration: "none", padding: "6px 12px", background: T.accDim, borderRadius: T.rX, marginBottom: 12 }}>
+              ↗ Ver referencia
+            </a>
+          )}
+
+          {/* Publish URL */}
+          {piece.publish_url && (
+            <a href={piece.publish_url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: T.acc, textDecoration: "none", padding: "6px 12px", background: T.accDim, borderRadius: T.rX, marginBottom: 12, marginLeft: 6 }}>
+              ↗ Ver publicación
+            </a>
+          )}
+
+          {/* Actions for revision_cliente */}
+          {isRev && (
+            <div style={{ marginTop: 16, borderTop: `1px solid ${T.brd}`, paddingTop: 16 }}>
+              {showFeedback ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <textarea value={feedback} onChange={e => setFeedback(e.target.value)} placeholder="Escribe tu comentario o sugerencia..." rows={3} style={{ background: T.bg, border: `1px solid ${T.brdL}`, borderRadius: T.rS, padding: "10px 12px", color: T.txt, fontSize: 13, fontFamily: T.f, resize: "vertical", outline: "none", width: "100%", boxSizing: "border-box" }} autoFocus />
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => { onRequestChanges(piece.id, feedback); setShowFeedback(false); setFeedback(""); }} disabled={!feedback.trim()} style={{ background: T.yel, color: "#0A0A0A", border: "none", borderRadius: T.rX, padding: "9px 18px", fontSize: 13, fontWeight: 700, fontFamily: T.f, cursor: "pointer", opacity: !feedback.trim() ? .4 : 1 }}>Enviar cambios</button>
+                    <button onClick={() => { setShowFeedback(false); setFeedback(""); }} style={{ background: "transparent", color: T.txtM, border: `1px solid ${T.brdL}`, borderRadius: T.rX, padding: "9px 18px", fontSize: 13, fontFamily: T.f, cursor: "pointer" }}>Cancelar</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button onClick={() => onApprove(piece.id)} style={{ display: "flex", alignItems: "center", gap: 6, background: T.acc, color: "#0A0A0A", border: "none", borderRadius: T.rX, padding: "10px 20px", fontSize: 14, fontWeight: 700, fontFamily: T.f, cursor: "pointer" }}>✓ Aprobar</button>
+                  <button onClick={() => setShowFeedback(true)} style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", color: T.yel, border: `1px solid ${T.yel}40`, borderRadius: T.rX, padding: "10px 20px", fontSize: 13, fontWeight: 600, fontFamily: T.f, cursor: "pointer" }}>💬 Pedir cambios</button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
 // ============================================================
-// CALENDAR SECTION
+// PROGRESS BAR
 // ============================================================
-function CalendarSection({ pieces, calMonth, setCalMonth }) {
-  const year = calMonth.getFullYear();
-  const month = calMonth.getMonth();
-  const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
+function ProgressSection({ pieces }) {
+  const total = pieces.length;
+  const published = pieces.filter(p => p.status === "publicado").length;
+  const inReview = pieces.filter(p => p.status === "revision_cliente").length;
+  const inProgress = pieces.filter(p => !["publicado", "revision_cliente", "pendiente"].includes(p.status)).length;
+  const pending = pieces.filter(p => p.status === "pendiente").length;
+  const pct = total > 0 ? Math.round((published / total) * 100) : 0;
+
+  return (
+    <div style={{ background: T.card, border: `1px solid ${T.brd}`, borderRadius: T.r, padding: "18px 20px", marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: T.txt }}>Entrega del mes</div>
+        <div style={{ fontSize: 22, fontWeight: 800, color: T.acc }}>{pct}%</div>
+      </div>
+      {/* Bar */}
+      <div style={{ height: 8, background: T.bg, borderRadius: 4, overflow: "hidden", display: "flex" }}>
+        {published > 0 && <div style={{ width: `${(published / total) * 100}%`, background: T.acc, transition: "width .4s" }} />}
+        {inReview > 0 && <div style={{ width: `${(inReview / total) * 100}%`, background: T.yel, transition: "width .4s" }} />}
+        {inProgress > 0 && <div style={{ width: `${(inProgress / total) * 100}%`, background: T.blue, transition: "width .4s" }} />}
+      </div>
+      {/* Legend */}
+      <div style={{ display: "flex", gap: 16, marginTop: 10, flexWrap: "wrap" }}>
+        {[
+          { label: `${published} publicadas`, color: T.acc },
+          { label: `${inReview} en tu revisión`, color: T.yel },
+          { label: `${inProgress} en proceso`, color: T.blue },
+          { label: `${pending} pendientes`, color: T.txtD },
+        ].map(l => (
+          <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: l.color }} />
+            <span style={{ fontSize: 11, color: T.txtM }}>{l.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// PAYMENT REMINDER
+// ============================================================
+function PaymentReminder({ client, pieces }) {
+  // payment_type: 'on_delivery' | 'fixed'
+  // payment_day: number (day of month) for fixed
+  const payType = client.payment_type || "on_delivery";
+  const payDay = client.payment_day || 1;
+  const total = pieces.length;
+  const published = pieces.filter(p => p.status === "publicado").length;
+  const pct = total > 0 ? Math.round((published / total) * 100) : 0;
+  const now = new Date();
+
+  let message, urgency;
+  if (payType === "on_delivery") {
+    if (pct >= 100) {
+      message = "Todos los entregables completados. Pago listo para procesarse.";
+      urgency = "ready";
+    } else {
+      message = `Pago al completar entregables — ${published}/${total} listos (${pct}%)`;
+      urgency = "info";
+    }
+  } else {
+    const nextPay = new Date(now.getFullYear(), now.getMonth(), payDay);
+    if (nextPay <= now) nextPay.setMonth(nextPay.getMonth() + 1);
+    const daysUntil = Math.ceil((nextPay - now) / 864e5);
+    if (daysUntil <= 3) {
+      message = `Próximo pago en ${daysUntil} día${daysUntil !== 1 ? "s" : ""} (${nextPay.toLocaleDateString("es-MX", { day: "numeric", month: "short" })})`;
+      urgency = "soon";
+    } else {
+      message = `Próximo pago: ${nextPay.toLocaleDateString("es-MX", { day: "numeric", month: "long" })}`;
+      urgency = "info";
+    }
+  }
+
+  const colors = { ready: { bg: T.accDim, bd: `${T.acc}33`, c: T.acc }, soon: { bg: T.yelDim, bd: `${T.yel}33`, c: T.yel }, info: { bg: `${T.txtD}15`, bd: T.brd, c: T.txtM } };
+  const cl = colors[urgency];
+
+  return (
+    <div style={{ background: cl.bg, border: `1px solid ${cl.bd}`, borderRadius: T.rS, padding: "12px 16px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
+      <span style={{ fontSize: 16 }}>{urgency === "ready" ? "💰" : urgency === "soon" ? "⏰" : "📅"}</span>
+      <span style={{ fontSize: 13, color: cl.c, fontWeight: 500 }}>{message}</span>
+    </div>
+  );
+}
+
+// ============================================================
+// CALENDAR with clickable pieces
+// ============================================================
+function CalendarSection({ pieces, calMonth, setCalMonth, onPieceClick }) {
+  const year = calMonth.getFullYear(), month = calMonth.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const monthName = calMonth.toLocaleDateString("es-MX", { month: "long", year: "numeric" });
+  const today = new Date();
 
-  // Group pieces by day
   const piecesByDay = useMemo(() => {
     const map = {};
-    pieces.forEach((p) => {
+    pieces.forEach(p => {
       if (!p.scheduled_date) return;
       const d = new Date(p.scheduled_date + "T12:00:00");
       if (d.getMonth() === month && d.getFullYear() === year) {
@@ -577,100 +340,52 @@ function CalendarSection({ pieces, calMonth, setCalMonth }) {
     return map;
   }, [pieces, month, year]);
 
-  const prevMonth = () => setCalMonth(new Date(year, month - 1, 1));
-  const nextMonth = () => setCalMonth(new Date(year, month + 1, 1));
-  const today = new Date();
-
-  const dayNames = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+  const days = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
   const cells = [];
   for (let i = 0; i < firstDay; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-      {/* Month nav */}
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <button onClick={prevMonth} style={{
-          background: T.card, border: `1px solid ${T.border}`, borderRadius: T.radiusXs,
-          padding: "8px", color: T.textMuted, cursor: "pointer", display: "flex",
-        }}>
-          <Icon.ChevronLeft />
-        </button>
-        <div style={{
-          fontSize: "16px", fontWeight: 700, color: T.text, textTransform: "capitalize",
-        }}>
-          {monthName}
-        </div>
-        <button onClick={nextMonth} style={{
-          background: T.card, border: `1px solid ${T.border}`, borderRadius: T.radiusXs,
-          padding: "8px", color: T.textMuted, cursor: "pointer", display: "flex",
-        }}>
-          <Icon.ChevronRight />
-        </button>
+        <button onClick={() => setCalMonth(new Date(year, month - 1, 1))} style={{ background: T.card, border: `1px solid ${T.brd}`, borderRadius: T.rX, padding: 8, color: T.txtM, cursor: "pointer", fontSize: 18, lineHeight: 1, display: "flex" }}>‹</button>
+        <div style={{ fontSize: 16, fontWeight: 700, color: T.txt, textTransform: "capitalize" }}>{monthName}</div>
+        <button onClick={() => setCalMonth(new Date(year, month + 1, 1))} style={{ background: T.card, border: `1px solid ${T.brd}`, borderRadius: T.rX, padding: 8, color: T.txtM, cursor: "pointer", fontSize: 18, lineHeight: 1, display: "flex" }}>›</button>
       </div>
 
-      {/* Grid */}
-      <div style={{
-        background: T.card, border: `1px solid ${T.border}`, borderRadius: T.radius,
-        overflow: "hidden",
-      }}>
-        {/* Day headers */}
-        <div style={{
-          display: "grid", gridTemplateColumns: "repeat(7, 1fr)",
-          borderBottom: `1px solid ${T.border}`,
-        }}>
-          {dayNames.map((d) => (
-            <div key={d} style={{
-              padding: "10px 4px", textAlign: "center", fontSize: "11px", fontWeight: 700,
-              color: T.textDim, letterSpacing: "0.8px", textTransform: "uppercase",
-            }}>
-              {d}
-            </div>
-          ))}
+      <div style={{ background: T.card, border: `1px solid ${T.brd}`, borderRadius: T.r, overflow: "hidden" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", borderBottom: `1px solid ${T.brd}` }}>
+          {days.map(d => <div key={d} style={{ padding: "10px 4px", textAlign: "center", fontSize: 11, fontWeight: 700, color: T.txtD, textTransform: "uppercase", letterSpacing: ".5px" }}>{d}</div>)}
         </div>
-
-        {/* Day cells */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)" }}>
           {cells.map((day, i) => {
             const isToday = day && today.getDate() === day && today.getMonth() === month && today.getFullYear() === year;
-            const dayPieces = day ? piecesByDay[day] || [] : [];
+            const dp = day ? piecesByDay[day] || [] : [];
             return (
-              <div
-                key={i}
-                style={{
-                  minHeight: "80px", padding: "4px",
-                  borderRight: (i + 1) % 7 !== 0 ? `1px solid ${T.border}` : "none",
-                  borderBottom: `1px solid ${T.border}`,
-                  background: day ? "transparent" : "rgba(255,255,255,0.01)",
-                }}
-              >
+              <div key={i} style={{ minHeight: 80, padding: 4, borderRight: (i + 1) % 7 !== 0 ? `1px solid ${T.brd}` : "none", borderBottom: `1px solid ${T.brd}`, background: day ? "transparent" : "rgba(255,255,255,.01)" }}>
                 {day && (
                   <>
-                    <div style={{
-                      fontSize: "12px", fontWeight: isToday ? 800 : 500,
-                      color: isToday ? T.accent : T.textMuted,
-                      padding: "4px 6px",
-                      ...(isToday ? {
-                        background: T.accentDim, borderRadius: "4px", display: "inline-block",
-                      } : {}),
-                    }}>
-                      {day}
-                    </div>
-                    {dayPieces.map((p) => (
-                      <div
-                        key={p.id}
-                        style={{
-                          margin: "2px 2px", padding: "3px 6px", borderRadius: "4px",
-                          fontSize: "10px", fontWeight: 600, lineHeight: 1.3,
-                          color: p.status === "publicado" ? T.accent : p.status === "listo" ? T.blue : T.textMuted,
-                          background: p.status === "publicado" ? T.accentDim : p.status === "listo" ? T.blueDim : `${T.textDim}20`,
+                    <div style={{ fontSize: 12, fontWeight: isToday ? 800 : 500, color: isToday ? T.acc : T.txtM, padding: "3px 5px", ...(isToday ? { background: T.accDim, borderRadius: 4, display: "inline-block" } : {}) }}>{day}</div>
+                    {dp.map(p => {
+                      const pc = statusC[p.status] || T.txtD;
+                      const hasFile = !!(p.edicion_output || p.grabacion_output);
+                      return (
+                        <div key={p.id} onClick={() => onPieceClick(p)} style={{
+                          margin: "2px 1px", padding: "3px 5px", borderRadius: 4,
+                          fontSize: 10, fontWeight: 600, lineHeight: 1.3,
+                          color: pc, background: `${pc}15`,
+                          cursor: "pointer", transition: "all .12s",
                           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          borderLeft: hasFile ? `2px solid ${pc}` : "none",
                         }}
-                        title={`${p.title} — ${statusLabels[p.status] || p.status}`}
-                      >
-                        {typeLabels[p.type] || p.type}
-                      </div>
-                    ))}
+                          onMouseEnter={e => { e.currentTarget.style.background = `${pc}28`; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = `${pc}15`; }}
+                          title={`${p.title} — ${statusL[p.status]}${hasFile ? " (archivo listo)" : ""}`}
+                        >
+                          {typeL[p.type] || p.type}
+                        </div>
+                      );
+                    })}
                   </>
                 )}
               </div>
@@ -680,515 +395,247 @@ function CalendarSection({ pieces, calMonth, setCalMonth }) {
       </div>
 
       {/* Legend */}
-      <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", padding: "0 4px" }}>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
         {[
-          { label: "Publicado", color: T.accent, bg: T.accentDim },
-          { label: "Listo", color: T.blue, bg: T.blueDim },
-          { label: "En proceso", color: T.textMuted, bg: `${T.textDim}20` },
-        ].map((l) => (
-          <div key={l.label} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <div style={{ width: "10px", height: "10px", borderRadius: "3px", background: l.bg, border: `1px solid ${l.color}40` }} />
-            <span style={{ fontSize: "12px", color: T.textMuted }}>{l.label}</span>
+          { label: "Publicado", color: T.acc }, { label: "Tu revisión", color: T.yel },
+          { label: "En proceso", color: T.blue }, { label: "Pendiente", color: T.txtD },
+        ].map(l => (
+          <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 3, background: `${l.color}18`, border: `1px solid ${l.color}40` }} />
+            <span style={{ fontSize: 11, color: T.txtM }}>{l.label}</span>
           </div>
         ))}
-      </div>
-
-      {/* Upcoming list */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "8px" }}>
-        <div style={{
-          fontSize: "13px", fontWeight: 700, color: T.textMuted, letterSpacing: "0.5px",
-          textTransform: "uppercase", padding: "0 4px",
-        }}>
-          Próximas publicaciones
-        </div>
-        {pieces
-          .filter((p) => ["listo", "edicion", "grabacion", "aprobacion_cliente"].includes(p.status))
-          .sort((a, b) => (a.scheduled_date || "").localeCompare(b.scheduled_date || ""))
-          .slice(0, 6)
-          .map((p) => (
-            <div key={p.id} style={{
-              display: "flex", alignItems: "center", gap: "12px",
-              background: T.card, border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
-              padding: "12px 14px",
-            }}>
-              <div style={{
-                width: "8px", height: "8px", borderRadius: "50%", flexShrink: 0,
-                background: statusColors[p.status] || T.textDim,
-              }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{
-                  fontSize: "13px", fontWeight: 600, color: T.text,
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                }}>
-                  {p.title}
-                </div>
-                <div style={{ fontSize: "11px", color: T.textMuted, marginTop: "2px" }}>
-                  {typeLabels[p.type] || p.type} · {statusLabels[p.status] || p.status}
-                </div>
-              </div>
-              <div style={{ fontSize: "12px", color: T.textMuted, flexShrink: 0 }}>
-                {formatDate(p.scheduled_date)}
-              </div>
-            </div>
-          ))}
       </div>
     </div>
   );
 }
 
 // ============================================================
-// ADS DASHBOARD SECTION
+// ADS SECTION (kept from original, compacted)
 // ============================================================
 function AdsSection({ metrics }) {
   const m = metrics || DEMO_AD_METRICS;
-
-  const kpis = [
-    { label: "Inversión", value: `$${formatNumber(m.spend)}`, sub: "MXN este mes", color: T.text },
-    { label: "Impresiones", value: formatNumber(m.impressions), sub: "alcance total", color: T.blue },
-    { label: "Clics", value: formatNumber(m.clicks), sub: `CTR ${m.ctr}%`, color: T.accent },
-    { label: "Conversiones", value: m.conversions.toString(), sub: `CPC $${m.cpc}`, color: T.yellow },
-    { label: "ROAS", value: `${m.roas}x`, sub: "retorno", color: T.accent },
-  ];
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-      {/* KPI cards */}
-      <div style={{
-        display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "12px",
-      }}>
-        {kpis.map((kpi) => (
-          <div key={kpi.label} style={{
-            background: T.card, border: `1px solid ${T.border}`, borderRadius: T.radius,
-            padding: "18px 16px", display: "flex", flexDirection: "column", gap: "4px",
-          }}>
-            <div style={{ fontSize: "11px", fontWeight: 700, color: T.textMuted, letterSpacing: "0.5px", textTransform: "uppercase" }}>
-              {kpi.label}
-            </div>
-            <div style={{ fontSize: "26px", fontWeight: 800, color: kpi.color, letterSpacing: "-0.5px" }}>
-              {kpi.value}
-            </div>
-            <div style={{ fontSize: "11px", color: T.textDim }}>{kpi.sub}</div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px,1fr))", gap: 10 }}>
+        {[
+          { l: "Inversión", v: `$${fmtNum(m.spend)}`, s: "MXN", c: T.txt },
+          { l: "Impresiones", v: fmtNum(m.impressions), s: "alcance", c: T.blue },
+          { l: "Clics", v: fmtNum(m.clicks), s: `CTR ${m.ctr}%`, c: T.acc },
+          { l: "Conversiones", v: String(m.conversions), s: `CPC $${m.cpc}`, c: T.yel },
+          { l: "ROAS", v: `${m.roas}x`, s: "retorno", c: T.acc },
+        ].map(k => (
+          <div key={k.l} style={{ background: T.card, border: `1px solid ${T.brd}`, borderRadius: T.r, padding: "16px 14px" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: T.txtM, textTransform: "uppercase", letterSpacing: ".5px" }}>{k.l}</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: k.c, letterSpacing: "-.5px", marginTop: 2 }}>{k.v}</div>
+            <div style={{ fontSize: 11, color: T.txtD }}>{k.s}</div>
           </div>
         ))}
       </div>
-
-      {/* Campaigns table */}
-      <div style={{
-        background: T.card, border: `1px solid ${T.border}`, borderRadius: T.radius,
-        overflow: "hidden",
-      }}>
-        <div style={{
-          padding: "16px 18px 12px", borderBottom: `1px solid ${T.border}`,
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-        }}>
-          <div style={{ fontSize: "14px", fontWeight: 700, color: T.text }}>Campañas activas</div>
-          <div style={{
-            fontSize: "11px", color: T.accent, display: "flex", alignItems: "center", gap: "4px",
-          }}>
-            <Icon.TrendingUp /> En tiempo real
-          </div>
-        </div>
-
-        <div style={{ overflow: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-            <thead>
-              <tr>
-                {["Campaña", "Estado", "Inversión", "Impr.", "Clics", "Conv."].map((h) => (
-                  <th key={h} style={{
-                    padding: "10px 14px", textAlign: "left", fontWeight: 700,
-                    color: T.textDim, fontSize: "11px", letterSpacing: "0.5px",
-                    textTransform: "uppercase", borderBottom: `1px solid ${T.border}`,
-                  }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {m.campaigns.map((c, i) => (
-                <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
-                  <td style={{ padding: "12px 14px", color: T.text, fontWeight: 600 }}>{c.name}</td>
-                  <td style={{ padding: "12px 14px" }}>
-                    <span style={{
-                      fontSize: "11px", fontWeight: 700, textTransform: "uppercase",
-                      padding: "3px 8px", borderRadius: "4px",
-                      color: c.status === "active" ? T.accent : T.textMuted,
-                      background: c.status === "active" ? T.accentDim : `${T.textDim}20`,
-                    }}>
-                      {c.status === "active" ? "Activa" : "Pausada"}
-                    </span>
-                  </td>
-                  <td style={{ padding: "12px 14px", color: T.textMuted }}>${formatNumber(c.spend)}</td>
-                  <td style={{ padding: "12px 14px", color: T.textMuted }}>{formatNumber(c.impressions)}</td>
-                  <td style={{ padding: "12px 14px", color: T.textMuted }}>{formatNumber(c.clicks)}</td>
-                  <td style={{ padding: "12px 14px", color: T.accent, fontWeight: 600 }}>{c.conversions}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Placeholder note */}
-      <div style={{
-        padding: "14px 16px", background: T.yellowDim, border: `1px solid ${T.yellow}30`,
-        borderRadius: T.radiusSm, fontSize: "13px", color: T.yellow, lineHeight: 1.5,
-      }}>
-        Las métricas se actualizan automáticamente desde Meta Ads. La conexión en tiempo real con la API de Meta se está configurando — estos datos son una vista previa del formato.
+      <div style={{ background: T.card, border: `1px solid ${T.brd}`, borderRadius: T.r, overflow: "hidden" }}>
+        <div style={{ padding: "14px 16px", borderBottom: `1px solid ${T.brd}`, fontSize: 14, fontWeight: 700, color: T.txt }}>Campañas</div>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead><tr>{["Campaña", "Estado", "Inversión", "Clics", "Conv."].map(h => <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontWeight: 700, color: T.txtD, fontSize: 10, textTransform: "uppercase", borderBottom: `1px solid ${T.brd}` }}>{h}</th>)}</tr></thead>
+          <tbody>{m.campaigns.map((c, i) => (
+            <tr key={i} style={{ borderBottom: `1px solid ${T.brd}` }}>
+              <td style={{ padding: "10px 12px", color: T.txt, fontWeight: 600 }}>{c.name}</td>
+              <td style={{ padding: "10px 12px" }}><span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, color: c.status === "active" ? T.acc : T.txtM, background: c.status === "active" ? T.accDim : `${T.txtD}20`, textTransform: "uppercase" }}>{c.status === "active" ? "Activa" : "Pausada"}</span></td>
+              <td style={{ padding: "10px 12px", color: T.txtM }}>${fmtNum(c.spend)}</td>
+              <td style={{ padding: "10px 12px", color: T.txtM }}>{fmtNum(c.clicks)}</td>
+              <td style={{ padding: "10px 12px", color: T.acc, fontWeight: 600 }}>{c.conversions}</td>
+            </tr>
+          ))}</tbody>
+        </table>
       </div>
     </div>
   );
 }
 
 // ============================================================
-// MAIN PORTAL APP
+// MAIN PORTAL
 // ============================================================
 const TABS = [
-  { id: "review", label: "Revisión de Ideas", icon: Icon.FileText },
-  { id: "calendar", label: "Calendario", icon: Icon.Calendar },
-  { id: "ads", label: "Dashboard Ads", icon: Icon.BarChart },
+  { id: "calendar", label: "Calendario", icon: "📅" },
+  { id: "review", label: "Revisión", icon: "📋" },
+  { id: "ads", label: "Ads", icon: "📊" },
 ];
 
 export default function Portal() {
-  // Auth state
-  const [session, setSession] = useState(null); // { user, client }
+  const [session, setSession] = useState(null);
   const [loginError, setLoginError] = useState(null);
   const [loginLoading, setLoginLoading] = useState(false);
-// Check if already logged in from main login
-useEffect(() => {
-  try {
-    const stored = JSON.parse(localStorage.getItem('e32o_session'));
-    if (stored?.type === 'client' && stored?.user) {
-      // Build session from centralized auth
-      const clientId = stored.user.client_id;
-      setSession({ 
-        user: stored.user, 
-        client: { id: clientId, name: stored.user.client_name || 'Cliente' } 
-      });
-      setUseDemoData(false);
-    }
-  } catch {}
-}, []);
-  // App state
-  const [activeTab, setActiveTab] = useState("review");
-  const [reviewPieces, setReviewPieces] = useState([]);
-  const [calendarPieces, setCalendarPieces] = useState([]);
+  const [activeTab, setActiveTab] = useState("calendar");
+  const [pieces, setPieces] = useState([]);
   const [adMetrics, setAdMetrics] = useState(null);
   const [loading, setLoading] = useState(false);
   const [calMonth, setCalMonth] = useState(new Date());
-  const [feedbackPiece, setFeedbackPiece] = useState(null);
-  const [feedbackText, setFeedbackText] = useState("");
+  const [modalPiece, setModalPiece] = useState(null);
   const [toast, setToast] = useState(null);
   const [useDemoData, setUseDemoData] = useState(false);
 
-  // Show toast
-  const showToast = useCallback((msg, type = "success") => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
-  }, []);
+  const showToast = useCallback((msg, type = "success") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); }, []);
 
-  // Login handler
-  const handleLogin = useCallback(async (username, password) => {
-    setLoginLoading(true);
-    setLoginError(null);
+  // ── Check centralized session on mount ──
+  useEffect(() => {
     try {
-      // Try Supabase first
-      const users = await supabaseRest("client_users", {
-        filters: [["username", "eq", username]],
-        limit: 1,
-      });
-
-      if (users.length > 0) {
-        const user = users[0];
-        // Simple password check (in production, use bcrypt via Edge Function)
-        if (user.password_hash === password) {
-          // Get client info
-          const clients = await supabaseRest("clients", {
-            filters: [["id", "eq", user.client_id]],
-            limit: 1,
-          });
-          setSession({ user, client: clients[0] || { id: user.client_id, name: "Cliente" } });
-          return;
-        }
-      }
-
-      // Fallback: demo mode for known clients
-      const demoClients = {
-        brillo_valle: { id: "brillo_mio_valle", name: "Brillo Mío Valle", slug: "brillo_mio_valle" },
-        brillo_sf: { id: "brillo_mio_santa_fe", name: "Brillo Mío Santa Fe", slug: "brillo_mio_santa_fe" },
-        cire: { id: "cire", name: "Cire", slug: "cire" },
-        beauty_sj: { id: "beauty_design_san_jeronimo", name: "Beauty Design San Jerónimo", slug: "beauty_design_san_jeronimo" },
-        beauty_barber: { id: "beauty_design_barberia", name: "Beauty Design Barbería", slug: "beauty_design_barberia" },
-        sandy: { id: "sandy_arcos", name: "Sandy Arcos", slug: "sandy_arcos" },
-        mariana: { id: "profeta_mariana", name: "Profeta Mariana", slug: "profeta_mariana" },
-        victor: { id: "apostol_victor", name: "Apóstol Víctor", slug: "apostol_victor" },
-        diveland: { id: "diveland", name: "Diveland", slug: "diveland" },
-      };
-
-      if (demoClients[username] && password === "e3202026") {
-        setSession({ user: { username, client_id: demoClients[username].id }, client: demoClients[username] });
-        setUseDemoData(true);
+      const stored = JSON.parse(localStorage.getItem("e32o_session"));
+      if (stored?.type === "client" && stored?.user) {
+        const cid = stored.user.client_id;
+        setSession({ user: stored.user, client: { id: cid, name: stored.user.client_name || stored.user.display_name || "Cliente" } });
         return;
       }
-
-      setLoginError("Usuario o contraseña incorrectos");
-    } catch (err) {
-      // If Supabase tables don't exist yet, allow demo login
-      const demoClients = {
-        brillo_valle: { id: "brillo_mio_valle", name: "Brillo Mío Valle", slug: "brillo_mio_valle" },
-        cire: { id: "cire", name: "Cire", slug: "cire" },
-        sandy: { id: "sandy_arcos", name: "Sandy Arcos", slug: "sandy_arcos" },
-      };
-      if (demoClients[username] && password === "e3202026") {
-        setSession({ user: { username, client_id: demoClients[username].id }, client: demoClients[username] });
-        setUseDemoData(true);
-        return;
-      }
-      setLoginError("Error de conexión. Intenta de nuevo.");
-    } finally {
-      setLoginLoading(false);
-    }
+    } catch {}
   }, []);
 
-  // Load data
+  // ── Fallback login ──
+  const handleLogin = useCallback(async (username, password) => {
+    setLoginLoading(true); setLoginError(null);
+    try {
+      const users = await sbRest("client_users", { filters: [["username", "eq", username]], limit: 1 });
+      if (users.length > 0 && users[0].password_hash === password) {
+        const clients = await sbRest("clients", { filters: [["id", "eq", users[0].client_id]], limit: 1 });
+        setSession({ user: users[0], client: clients[0] || { id: users[0].client_id, name: "Cliente" } });
+        return;
+      }
+      const demo = { brillo_valle: { id: "c2", name: "Brillo Mío Valle" }, cire: { id: "c1", name: "Cire" }, sandy: { id: "c6", name: "Sandy Arcos" } };
+      if (demo[username] && password === "e3202026") { setSession({ user: { username, client_id: demo[username].id }, client: demo[username] }); setUseDemoData(true); return; }
+      setLoginError("Usuario o contraseña incorrectos");
+    } catch { setLoginError("Error de conexión"); }
+    finally { setLoginLoading(false); }
+  }, []);
+
+  // ── Load data ──
   useEffect(() => {
     if (!session) return;
-
-    const loadData = async () => {
+    (async () => {
       setLoading(true);
-      if (useDemoData) {
-        setReviewPieces(DEMO_PIECES_REVIEW);
-        setCalendarPieces(DEMO_PIECES_CALENDAR);
-        setAdMetrics(DEMO_AD_METRICS);
-        setLoading(false);
-        return;
-      }
-
+      if (useDemoData) { setPieces(DEMO_PIECES); setAdMetrics(DEMO_AD_METRICS); setLoading(false); return; }
       try {
-        // Review pieces (client approval stage)
-        const review = await supabaseRest("content_pieces", {
-          filters: [
-            ["client_id", "eq", session.client.id],
-            ["status", "eq", "aprobacion_cliente"],
-          ],
-          order: "scheduled_date.asc",
-        });
-        setReviewPieces(review);
-
-        // Calendar pieces (all non-research)
-        const cal = await supabaseRest("content_pieces", {
-          filters: [
-            ["client_id", "eq", session.client.id],
-            ["status", "neq", "research"],
-          ],
-          order: "scheduled_date.asc",
-        });
-        setCalendarPieces(cal);
-      } catch {
-        // Tables may not exist yet — use demo
-        setUseDemoData(true);
-        setReviewPieces(DEMO_PIECES_REVIEW);
-        setCalendarPieces(DEMO_PIECES_CALENDAR);
-        setAdMetrics(DEMO_AD_METRICS);
-      }
+        const p = await sbRest("content_pieces", { filters: [["client_id", "eq", session.client.id]], order: "scheduled_date.asc" });
+        if (p.length > 0) { setPieces(p); } else { setPieces(DEMO_PIECES); setUseDemoData(true); }
+      } catch { setPieces(DEMO_PIECES); setUseDemoData(true); }
+      setAdMetrics(DEMO_AD_METRICS);
       setLoading(false);
-    };
-
-    loadData();
+    })();
   }, [session, useDemoData]);
 
-  // Approve piece
-  const handleApprove = useCallback(async (pieceId) => {
-    if (!useDemoData) {
-      try {
-        await supabasePatch("content_pieces", pieceId, { status: "grabacion" });
-      } catch {}
-    }
-    setReviewPieces((prev) => prev.filter((p) => p.id !== pieceId));
-    showToast("Idea aprobada. El equipo ya puede avanzar a grabación.");
+  const handleApprove = useCallback(async (id) => {
+    if (!useDemoData) { try { await sbPatch("content_pieces", id, { status: "grabacion" }); } catch {} }
+    setPieces(prev => prev.map(p => p.id === id ? { ...p, status: "grabacion" } : p));
+    setModalPiece(null);
+    showToast("Idea aprobada. El equipo avanza a grabación.");
   }, [useDemoData, showToast]);
 
-  // Request changes
-  const handleRequestChanges = useCallback(async (pieceId, feedback) => {
-    if (!useDemoData) {
-      try {
-        await supabasePatch("content_pieces", pieceId, {
-          status: "guion",
-          client_feedback: feedback,
-        });
-      } catch {}
-    }
-    setReviewPieces((prev) => prev.filter((p) => p.id !== pieceId));
+  const handleRequestChanges = useCallback(async (id, feedback) => {
+    if (!useDemoData) { try { await sbPatch("content_pieces", id, { status: "guion", client_feedback: feedback }); } catch {} }
+    setPieces(prev => prev.map(p => p.id === id ? { ...p, status: "guion" } : p));
+    setModalPiece(null);
     showToast("Comentario enviado. El equipo ajustará la propuesta.", "info");
   }, [useDemoData, showToast]);
 
-  // Has ads?
-  const clientHasAds = session && ADS_CLIENTS.includes(session.client.id || session.client.slug);
-  const visibleTabs = TABS.filter((t) => t.id !== "ads" || clientHasAds);
+  const reviewPieces = useMemo(() => pieces.filter(p => p.status === "revision_cliente"), [pieces]);
+  const hasAds = session && ADS_CLIENTS.includes(session?.client?.id);
+  const visTabs = TABS.filter(t => t.id !== "ads" || hasAds);
 
-  // Logout
-  const handleLogout = () => {
-    setSession(null);
-    setUseDemoData(false);
-    setReviewPieces([]);
-    setCalendarPieces([]);
-    setAdMetrics(null);
-    setActiveTab("review");
-  };
+  const handleLogout = () => { localStorage.removeItem("e32o_session"); setSession(null); setUseDemoData(false); setPieces([]); };
 
-  // ---- RENDER ----
-  if (!session) {
-    return <LoginScreen onLogin={handleLogin} error={loginError} loading={loginLoading} />;
-  }
+  if (!session) return <LoginScreen onLogin={handleLogin} error={loginError} loading={loginLoading} />;
 
   return (
-    <div style={{
-      minHeight: "100vh", background: T.bg, fontFamily: T.font, color: T.text,
-    }}>
-      {/* Google Fonts */}
+    <div style={{ minHeight: "100vh", background: T.bg, fontFamily: T.f, color: T.txt }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
       {/* Header */}
-      <header style={{
-        position: "sticky", top: 0, zIndex: 100,
-        background: "rgba(10,10,10,0.85)", backdropFilter: "blur(20px)",
-        borderBottom: `1px solid ${T.border}`,
-      }}>
-        <div style={{
-          maxWidth: "900px", margin: "0 auto", padding: "14px 20px",
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-            <div style={{ fontSize: "20px", fontWeight: 800, letterSpacing: "-0.8px" }}>
-              e<span style={{ color: T.accent }}>.</span>32o
-            </div>
-            <div style={{
-              width: "1px", height: "20px", background: T.borderLight,
-            }} />
-            <div style={{ fontSize: "14px", fontWeight: 600, color: T.textMuted }}>
-              {session.client.name}
-            </div>
+      <header style={{ position: "sticky", top: 0, zIndex: 100, background: "rgba(10,10,10,.9)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${T.brd}` }}>
+        <div style={{ maxWidth: 900, margin: "0 auto", padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-.8px" }}>e<span style={{ color: T.acc }}>.</span>32o</span>
+            <span style={{ width: 1, height: 20, background: T.brdL }} />
+            <span style={{ fontSize: 14, fontWeight: 600, color: T.txtM }}>{session.client.name}</span>
           </div>
-          <button onClick={handleLogout} style={{
-            display: "flex", alignItems: "center", gap: "6px",
-            background: "transparent", border: `1px solid ${T.border}`, borderRadius: T.radiusXs,
-            padding: "7px 12px", color: T.textMuted, fontSize: "12px", fontWeight: 600,
-            fontFamily: T.font, cursor: "pointer",
-          }}>
-            <Icon.LogOut /> Salir
-          </button>
+          <button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${T.brd}`, borderRadius: T.rX, padding: "6px 12px", color: T.txtM, fontSize: 12, fontWeight: 600, fontFamily: T.f, cursor: "pointer" }}>Salir</button>
         </div>
       </header>
 
-      {/* Tabs */}
-      <div style={{
-        maxWidth: "900px", margin: "0 auto", padding: "16px 20px 0",
-      }}>
-        <div style={{
-          display: "flex", gap: "4px", background: T.card, borderRadius: T.radiusSm,
-          padding: "4px", border: `1px solid ${T.border}`,
-        }}>
-          {visibleTabs.map((tab) => {
+      <main style={{ maxWidth: 900, margin: "0 auto", padding: "16px 20px 80px" }}>
+        {/* Tabs */}
+        <div style={{ display: "flex", gap: 4, background: T.card, borderRadius: T.rS, padding: 4, border: `1px solid ${T.brd}`, marginBottom: 16 }}>
+          {visTabs.map(tab => {
             const active = activeTab === tab.id;
-            const TabIcon = tab.icon;
+            const badge = tab.id === "review" ? reviewPieces.length : 0;
             return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                style={{
-                  flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
-                  padding: "10px 12px", borderRadius: T.radiusXs, border: "none",
-                  background: active ? T.accentDim : "transparent",
-                  color: active ? T.accent : T.textMuted,
-                  fontSize: "13px", fontWeight: active ? 700 : 500, fontFamily: T.font,
-                  cursor: "pointer", transition: "all 0.2s",
-                }}
-              >
-                <TabIcon />
-                <span style={{ display: "inline" }}>{tab.label}</span>
-                {tab.id === "review" && reviewPieces.length > 0 && (
-                  <span style={{
-                    background: T.accent, color: "#0A0A0A", fontSize: "10px", fontWeight: 800,
-                    padding: "1px 6px", borderRadius: "10px", minWidth: "18px", textAlign: "center",
-                  }}>
-                    {reviewPieces.length}
-                  </span>
-                )}
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
+                flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                padding: "10px 12px", borderRadius: T.rX, border: "none",
+                background: active ? T.accDim : "transparent", color: active ? T.acc : T.txtM,
+                fontSize: 13, fontWeight: active ? 700 : 500, fontFamily: T.f, cursor: "pointer",
+              }}>
+                {tab.icon} {tab.label}
+                {badge > 0 && <span style={{ background: T.acc, color: "#0A0A0A", fontSize: 10, fontWeight: 800, padding: "1px 6px", borderRadius: 10, minWidth: 18, textAlign: "center" }}>{badge}</span>}
               </button>
             );
           })}
         </div>
-      </div>
 
-      {/* Content */}
-      <main style={{
-        maxWidth: "900px", margin: "0 auto", padding: "20px 20px 80px",
-      }}>
         {loading ? (
-          <div style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            padding: "80px 20px", color: T.textMuted, fontSize: "14px",
-          }}>
-            <div style={{
-              width: "24px", height: "24px", border: `2px solid ${T.border}`,
-              borderTopColor: T.accent, borderRadius: "50%",
-              animation: "spin 0.8s linear infinite", marginRight: "10px",
-            }} />
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 80, color: T.txtM }}>
+            <div style={{ width: 24, height: 24, border: `2px solid ${T.brd}`, borderTopColor: T.acc, borderRadius: "50%", animation: "spin .8s linear infinite", marginRight: 10 }} />
             Cargando...
-            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
           </div>
         ) : (
           <>
-            {activeTab === "review" && (
-              <ReviewSection
-                pieces={reviewPieces}
-                onApprove={handleApprove}
-                onRequestChanges={handleRequestChanges}
-                feedbackPiece={feedbackPiece}
-                setFeedbackPiece={setFeedbackPiece}
-                feedbackText={feedbackText}
-                setFeedbackText={setFeedbackText}
-              />
-            )}
             {activeTab === "calendar" && (
-              <CalendarSection
-                pieces={calendarPieces}
-                calMonth={calMonth}
-                setCalMonth={setCalMonth}
-              />
+              <>
+                <ProgressSection pieces={pieces} />
+                <PaymentReminder client={session.client} pieces={pieces} />
+                <CalendarSection pieces={pieces} calMonth={calMonth} setCalMonth={setCalMonth} onPieceClick={setModalPiece} />
+              </>
+            )}
+            {activeTab === "review" && (
+              reviewPieces.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "80px 20px" }}>
+                  <div style={{ fontSize: 48, opacity: .3, marginBottom: 12 }}>✓</div>
+                  <div style={{ fontSize: 18, fontWeight: 600, color: T.txt }}>Todo al día</div>
+                  <div style={{ fontSize: 14, color: T.txtM, marginTop: 8 }}>No hay piezas pendientes de tu revisión.</div>
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ fontSize: 13, color: T.txtM }}>{reviewPieces.length} pieza{reviewPieces.length > 1 ? "s" : ""} pendiente{reviewPieces.length > 1 ? "s" : ""}</div>
+                  {reviewPieces.map(p => (
+                    <div key={p.id} onClick={() => setModalPiece(p)} style={{
+                      background: T.card, border: `1px solid ${T.brd}`, borderRadius: T.r,
+                      padding: "16px 18px", cursor: "pointer", transition: "border-color .15s",
+                    }} onMouseEnter={e => e.currentTarget.style.borderColor = T.yel + "44"} onMouseLeave={e => e.currentTarget.style.borderColor = T.brd}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: `${typeC[p.type] || T.acc}15`, color: typeC[p.type] || T.acc, textTransform: "uppercase" }}>{typeL[p.type] || p.type}</span>
+                        <span style={{ fontSize: 12, color: T.txtM }}>{fmtDate(p.scheduled_date)}</span>
+                        <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 600, color: T.yel, background: T.yelDim, padding: "2px 8px", borderRadius: 10 }}>Pendiente de revisión</span>
+                      </div>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: T.txt }}>{p.title}</div>
+                      {p.guion_output && <div style={{ fontSize: 12, color: T.txtM, marginTop: 6, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{p.guion_output}</div>}
+                    </div>
+                  ))}
+                </div>
+              )
             )}
             {activeTab === "ads" && <AdsSection metrics={adMetrics} />}
           </>
         )}
       </main>
 
-      {/* Demo badge */}
-      {useDemoData && (
-        <div style={{
-          position: "fixed", bottom: "16px", left: "50%", transform: "translateX(-50%)",
-          background: T.card, border: `1px solid ${T.borderLight}`, borderRadius: "20px",
-          padding: "8px 16px", fontSize: "12px", color: T.textMuted, zIndex: 200,
-          backdropFilter: "blur(10px)",
-        }}>
-          Modo demo — datos de ejemplo
-        </div>
-      )}
+      {/* Piece modal */}
+      {modalPiece && <PieceModal piece={modalPiece} onClose={() => setModalPiece(null)} onApprove={handleApprove} onRequestChanges={handleRequestChanges} />}
 
       {/* Toast */}
       {toast && (
-        <div style={{
-          position: "fixed", top: "20px", right: "20px",
-          background: toast.type === "success" ? T.accentDim : T.yellowDim,
-          border: `1px solid ${toast.type === "success" ? T.accent : T.yellow}40`,
-          borderRadius: T.radiusSm, padding: "12px 18px", maxWidth: "360px",
-          fontSize: "13px", fontWeight: 600, zIndex: 300,
-          color: toast.type === "success" ? T.accent : T.yellow,
-          animation: "slideIn 0.3s ease-out",
-        }}>
+        <div style={{ position: "fixed", top: 20, right: 20, background: toast.type === "success" ? T.accDim : T.yelDim, border: `1px solid ${toast.type === "success" ? T.acc : T.yel}40`, borderRadius: T.rS, padding: "12px 18px", maxWidth: 360, fontSize: 13, fontWeight: 600, zIndex: 1100, color: toast.type === "success" ? T.acc : T.yel, animation: "slideIn .3s ease-out" }}>
           {toast.msg}
-          <style>{`@keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }`}</style>
+          <style>{`@keyframes slideIn{from{transform:translateX(20px);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
         </div>
       )}
+
+      {useDemoData && <div style={{ position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)", background: T.card, border: `1px solid ${T.brdL}`, borderRadius: 20, padding: "8px 16px", fontSize: 12, color: T.txtM, zIndex: 200 }}>Modo demo</div>}
     </div>
   );
 }
