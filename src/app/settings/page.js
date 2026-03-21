@@ -1,5 +1,8 @@
 "use client";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react"; 
+import NavHeader from '@/components/NavHeader';
+import { getSession, isAdmin } from '@/lib/auth';
+import { useRouter } from 'next/navigation';
 
 // ── Supabase lightweight client ──
 const SUPABASE_URL = "https://fyiukqelspqdvdulczrs.supabase.co";
