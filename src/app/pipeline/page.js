@@ -1,475 +1,274 @@
 'use client';
+import { useState, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import { getSession, isAdmin } from '@/lib/auth';
+import { supabase } from '@/lib/supabase';
+import { C, FLOW_FULL, FLOW_SHORT, PIECE_LABELS, PIECE_COLORS, STAGE_LABELS, ROLE_COLORS, CURRENT_PERIOD } from '@/lib/tokens';
+import NavHeader from '@/components/NavHeader';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  STAGES, STAGE_KEYS, STAGE_ASSIGNED_FIELD, STAGE_OUTPUT_FIELD, STAGE_OUTPUT_TYPE,
-  getStage, getNextStage, getPieceType, formatDeadline, isOverdue, getMonthOptions,
-  isFounder, PIECE_TYPES,
-} from '../../lib/pipeline-helpers';
-import { supabase } from '../../lib/supabase';
+// ── All stages for kanban columns ──
+const KANBAN_STAGES = [
+  { k:'pendiente', l:'Pendiente', c:C.txtM },
+  { k:'research', l:'Research', c:C.purp },
+  { k:'guion', l:'Guión', c:C.blue },
+  { k:'aprobacion', l:'Aprobación', c:C.amb },
+  { k:'grabacion', l:'Grabación', c:C.cor },
+  { k:'edicion', l:'Edición', c:C.purp },
+  { k:'revision_cliente', l:'Rev. cliente', c:C.amb },
+  { k:'publicado', l:'Publicado', c:C.teal },
+];
+const STAGE_KEYS = KANBAN_STAGES.map(s => s.k);
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Design tokens
-// ═══════════════════════════════════════════════════════════════════════════
-const T = {
-  bg:       '#0A0A0A',
-  card:     '#111111',
-  cardHov:  '#161616',
-  surface:  '#1A1A1A',
-  border:   '#222222',
-  borderLt: '#2A2A2A',
-  accent:   '#B8F03E',
-  accentDk: '#8BBF1A',
-  warn:     '#F59E0B',
-  danger:   '#EF4444',
-  muted:    '#666666',
-  text:     '#E5E5E5',
-  textDim:  '#999999',
-  white:    '#FFFFFF',
-  radius:   '10px',
-  radiusSm: '6px',
-  radiusLg: '14px',
-  shadow:   '0 4px 24px rgba(0,0,0,.4)',
-  font:     "'DM Sans', 'Inter', system-ui, sans-serif",
+const OUTPUT_FIELDS = {
+  research: 'research_output', guion: 'guion_output', aprobacion: 'aprobacion_output',
+  grabacion: 'grabacion_output', edicion: 'edicion_output', revision_cliente: 'revision_cliente_output',
+};
+const ASSIGNED_FIELDS = {
+  research: 'research_assigned', guion: 'guion_assigned', aprobacion: 'aprobacion_assigned',
+  grabacion: 'grabacion_assigned', edicion: 'edicion_assigned', revision_cliente: 'revision_cliente_assigned',
+};
+const OUTPUT_TYPES = {
+  research:'url', guion:'text', aprobacion:'approval', grabacion:'file', edicion:'file', revision_cliente:'approval',
 };
 
-// ═══════════════════════════════════════════════════════════════════════════
-// DEMO DATA  (replace with Supabase queries in production)
-// ═══════════════════════════════════════════════════════════════════════════
-const DEMO_CLIENTS = [
-  { id: 'c1', name: 'Cire' },
-  { id: 'c2', name: 'Brillo Mío Valle' },
-  { id: 'c3', name: 'Brillo Mío Santa Fe' },
-  { id: 'c4', name: 'Beauty Design SJ' },
-  { id: 'c5', name: 'Beauty Design Barbería' },
-  { id: 'c6', name: 'Sandy Arcos' },
-  { id: 'c7', name: 'Profeta Mariana' },
-  { id: 'c8', name: 'Apóstol Víctor' },
-  { id: 'c9', name: 'Diveland' },
-];
+// ── Helpers ──
+function getStage(k) { return KANBAN_STAGES.find(s => s.k === k) || KANBAN_STAGES[0]; }
+function nextStage(k) { const i = STAGE_KEYS.indexOf(k); return i < 0 || i >= STAGE_KEYS.length - 1 ? null : KANBAN_STAGES[i + 1]; }
+function fmtDeadline(d) {
+  if (!d) return '—';
+  const dt = new Date(d + 'T12:00:00'), now = new Date();
+  const diff = Math.ceil((dt - now) / 864e5);
+  const f = dt.toLocaleDateString('es-MX', { day:'numeric', month:'short' });
+  if (diff < 0) return `${f} (${Math.abs(diff)}d atraso)`;
+  if (diff === 0) return `${f} (hoy)`;
+  if (diff <= 3) return `${f} (${diff}d)`;
+  return f;
+}
+function isOverdue(d) { return d && new Date(d + 'T12:00:00') < new Date(); }
+function getMonths() {
+  const m = [], now = new Date();
+  for (let i = -2; i <= 3; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    m.push({ v: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`, l: d.toLocaleDateString('es-MX',{month:'long',year:'numeric'}) });
+  }
+  return m;
+}
 
+// ── Demo data ──
+const DEMO_CLIENTS = [
+  {id:'c1',name:'Cire'},{id:'c2',name:'Brillo Mío Valle'},{id:'c3',name:'Brillo Mío Santa Fe'},
+  {id:'c4',name:'Beauty Design SJ'},{id:'c5',name:'Beauty Design Barbería'},
+  {id:'c6',name:'Sandy Arcos'},{id:'c7',name:'Profeta Mariana'},{id:'c8',name:'Apóstol Víctor'},{id:'c9',name:'Diveland'},
+];
 const DEMO_TEAM = [
-  { username: 'fer_ayala',       display: 'Fer',       role: 'owner' },
-  { username: 'yaz_antonio',     display: 'Yaz',       role: 'coowner' },
-  { username: 'natha_barragan',  display: 'Natha',     role: 'asistente' },
-  { username: 'jose_camacho',    display: 'José',      role: 'editor' },
-  { username: 'alhena_taboada',  display: 'Alhena',    role: 'crew' },
-  { username: 'mariana_yudico',  display: 'Mariana Y', role: 'crew' },
+  {username:'fer_ayala',display_name:'Fer',role:'founder'},
+  {username:'yaz_antonio',display_name:'Yaz',role:'cofounder'},
+  {username:'natha_barragan',display_name:'Natha',role:'asistente'},
+  {username:'jose_camacho',display_name:'José',role:'editor'},
+  {username:'alhena_taboada',display_name:'Alhena',role:'filmaker'},
+  {username:'mariana_yudico',display_name:'Mariana Y',role:'filmaker'},
 ];
 
 function makeDemoPieces(clientId) {
-  const titles = {
-    c1: [
-      { t: 'Reel - Resultados láser', type: 'reel' },
-      { t: 'Reel - Testimonio Karla', type: 'reel' },
-      { t: 'Carrusel - Promo mayo', type: 'carrusel' },
-      { t: 'Reel - Antes/después', type: 'reel' },
-      { t: 'Ad - Conversión WhatsApp', type: 'ad' },
-      { t: 'Reel - Proceso láser', type: 'reel' },
-      { t: 'Carrusel - Tips cuidado', type: 'carrusel' },
-      { t: 'Reel - Modelo sesión', type: 'reel' },
-    ],
-    c2: [
-      { t: 'Reel - Transformación color', type: 'reel' },
-      { t: 'Reel - Balayage tutorial', type: 'reel' },
-      { t: 'Fast - Corte express', type: 'fast_reel' },
-      { t: 'Carrusel - Tendencias 2026', type: 'carrusel' },
-      { t: 'Reel - Cliente feliz', type: 'reel' },
-      { t: 'Fast - Blow dry ASMR', type: 'fast_reel' },
-    ],
-    c6: [
-      { t: 'Ep 14 - Emprendimiento digital', type: 'episodio' },
-      { t: 'Clip 14.1 - Mejor consejo', type: 'clip' },
-      { t: 'Clip 14.2 - Error más grande', type: 'clip' },
-      { t: 'Reel - Sandy reacts', type: 'reel' },
-    ],
-    c7: [
-      { t: 'Ep - Predica domingo 23', type: 'episodio' },
-      { t: 'Clip prédica - Fe', type: 'clip' },
-      { t: 'Reel grabación BTS', type: 'reel' },
-      { t: 'Carrusel - Versículo semana', type: 'carrusel' },
-    ],
+  const defs = {
+    c1:[{t:'Reel - Resultados láser',y:'reel'},{t:'Reel - Testimonio Karla',y:'reel'},{t:'Carrusel - Promo mayo',y:'carrusel'},{t:'Reel - Antes/después',y:'reel'},{t:'Ad - Conversión WhatsApp',y:'gestion_ads'},{t:'Reel - Proceso láser',y:'reel'},{t:'Carrusel - Tips cuidado',y:'carrusel'},{t:'Reel - Modelo sesión',y:'reel'}],
+    c2:[{t:'Reel - Transformación color',y:'reel'},{t:'Reel - Balayage tutorial',y:'reel'},{t:'Fast - Corte express',y:'fast_reel'},{t:'Carrusel - Tendencias 2026',y:'carrusel'},{t:'Reel - Cliente feliz',y:'reel'},{t:'Fast - Blow dry ASMR',y:'fast_reel'}],
+    c6:[{t:'Ep 14 - Emprendimiento digital',y:'episodio_youtube'},{t:'Clip 14.1 - Mejor consejo',y:'reel_episodio'},{t:'Clip 14.2 - Error más grande',y:'reel_episodio'},{t:'Reel - Sandy reacts',y:'reel_individual'}],
+    c7:[{t:'Ep - Predica domingo 23',y:'episodio_youtube'},{t:'Clip prédica - Fe',y:'clip_predica'},{t:'Reel grabación BTS',y:'reel_grabacion'},{t:'Carrusel - Versículo semana',y:'carrusel'}],
   };
-
-  const pieceDefs = titles[clientId] || [
-    { t: 'Pieza 1', type: 'reel' },
-    { t: 'Pieza 2', type: 'reel' },
-    { t: 'Pieza 3', type: 'carrusel' },
-  ];
-
-  const statusPool = STAGE_KEYS;
-  const teamPool = DEMO_TEAM.map(t => t.username);
-
-  return pieceDefs.map((p, i) => {
-    const status = statusPool[i % statusPool.length];
-    const deadline = new Date();
-    deadline.setDate(deadline.getDate() + (i * 3 - 5));
-
-    const piece = {
-      id: `${clientId}-${i}`,
-      client_id: clientId,
-      title: p.t,
-      type: p.type,
-      status,
-      deadline: deadline.toISOString().split('T')[0],
-      month: '2026-03',
-      research_assigned: teamPool[(i + 2) % teamPool.length],
-      research_output: status !== 'pendiente' ? 'https://instagram.com/reel/example' : null,
-      research_comment: status !== 'pendiente' ? 'Hook fuerte, corte rápido, CTA al final' : null,
-      guion_assigned: teamPool[(i + 3) % teamPool.length],
-      guion_output: ['guion','aprobacion','grabacion','edicion','rev_cliente','publicado'].includes(status) ? '• Abre con pregunta\n• Muestra resultado\n• CTA' : null,
-      aprobacion_assigned: 'fer_ayala',
-      aprobacion_output: ['grabacion','edicion','rev_cliente','publicado'].includes(status) ? 'approved' : null,
-      grabacion_assigned: teamPool[(i + 4) % teamPool.length],
-      grabacion_output: ['edicion','rev_cliente','publicado'].includes(status) ? 'grabacion_reel_cire_14.mp4' : null,
-      edicion_assigned: 'jose_camacho',
-      edicion_output: ['rev_cliente','publicado'].includes(status) ? 'edit_final_v2.mp4' : null,
-      rev_cliente_assigned: null,
-      rev_cliente_output: status === 'publicado' ? 'approved' : null,
+  const p = defs[clientId] || [{t:'Pieza 1',y:'reel'},{t:'Pieza 2',y:'reel'},{t:'Pieza 3',y:'carrusel'}];
+  const tu = DEMO_TEAM.map(t=>t.username);
+  return p.map((x,i)=>{
+    const s = STAGE_KEYS[i % STAGE_KEYS.length];
+    const dl = new Date(); dl.setDate(dl.getDate()+(i*3-5));
+    return {
+      id:`${clientId}-${i}`, client_id:clientId, title:x.t, type:x.y, status:s,
+      deadline:dl.toISOString().split('T')[0], period:CURRENT_PERIOD,
+      research_assigned:tu[(i+2)%tu.length], research_output:s!=='pendiente'?'https://instagram.com/reel/example':null,
+      research_comment:s!=='pendiente'?'Hook fuerte, corte rápido, CTA al final':null,
+      guion_assigned:tu[(i+3)%tu.length], guion_output:['guion','aprobacion','grabacion','edicion','revision_cliente','publicado'].includes(s)?'• Abre con pregunta\n• Muestra resultado\n• CTA':null,
+      aprobacion_assigned:'fer_ayala', aprobacion_output:['grabacion','edicion','revision_cliente','publicado'].includes(s)?'approved':null,
+      grabacion_assigned:tu[(i+4)%tu.length], grabacion_output:['edicion','revision_cliente','publicado'].includes(s)?'grabacion_reel.mp4':null,
+      edicion_assigned:'jose_camacho', edicion_output:['revision_cliente','publicado'].includes(s)?'edit_final_v2.mp4':null,
+      revision_cliente_assigned:null, revision_cliente_output:s==='publicado'?'approved':null,
     };
-    return piece;
   });
 }
 
+// ── Styles ──
+const S = {
+  sel: { background:C.card, border:`1px solid ${C.brd}`, borderRadius:8, color:C.txt, padding:'8px 30px 8px 14px', fontSize:13, fontWeight:600, fontFamily:'inherit', cursor:'pointer', outline:'none', appearance:'none', WebkitAppearance:'none', backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23555' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E")`, backgroundRepeat:'no-repeat', backgroundPosition:'right 10px center' },
+  inp: { width:'100%', background:C.card, border:`1px solid ${C.brd}`, borderRadius:8, color:C.txt, padding:'10px 14px', fontSize:13, fontFamily:'inherit', outline:'none', resize:'vertical', boxSizing:'border-box' },
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
-// Sub-components
+// Components
 // ═══════════════════════════════════════════════════════════════════════════
 
-function Avatar({ username, size = 24 }) {
-  const member = DEMO_TEAM.find(t => t.username === username);
-  const initials = member ? member.display.slice(0, 2).toUpperCase() : '??';
-  const colors = ['#8B5CF6','#3B82F6','#EF4444','#EC4899','#06B6D4','#F59E0B'];
-  const idx = username ? username.charCodeAt(0) % colors.length : 0;
+function Avatar({ username, size = 22 }) {
+  const m = DEMO_TEAM.find(t => t.username === username);
+  const ini = m ? m.display_name.slice(0,2).toUpperCase() : '??';
+  const rc = ROLE_COLORS[m?.role] || C.txtS;
   return (
-    <div style={{
-      width: size, height: size, borderRadius: '50%',
-      background: colors[idx], display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: size * 0.4, fontWeight: 700, color: '#fff', flexShrink: 0,
-      border: `1.5px solid ${T.bg}`,
-    }} title={member?.display || username}>
-      {initials}
-    </div>
+    <div title={m?.display_name || username} style={{
+      width:size, height:size, borderRadius:'50%',
+      background:`${rc}22`, color:rc, display:'flex', alignItems:'center', justifyContent:'center',
+      fontSize:size*0.4, fontWeight:700, flexShrink:0, border:`1.5px solid ${C.bg}`,
+    }}>{ini}</div>
   );
 }
 
-function Badge({ children, color = T.accent, bg }) {
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 4,
-      padding: '2px 8px', borderRadius: 20,
-      background: bg || `${color}18`, color,
-      fontSize: 11, fontWeight: 600, letterSpacing: '.02em',
-      whiteSpace: 'nowrap',
-    }}>{children}</span>
-  );
+function Badge({ children, color = C.acc }) {
+  return <span style={{ display:'inline-flex', alignItems:'center', gap:4, padding:'2px 8px', borderRadius:20, background:`${color}18`, color, fontSize:11, fontWeight:600, whiteSpace:'nowrap' }}>{children}</span>;
 }
 
-function StageIndicator({ stageKey, small }) {
-  const s = getStage(stageKey);
-  return (
-    <Badge color={s.color}>
-      <span style={{ fontSize: small ? 10 : 12 }}>{s.icon}</span>
-      {!small && s.label}
-    </Badge>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// PipelineCard  (inside kanban column)
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ── Card ──
 function PipelineCard({ piece, onClick }) {
-  const pt = getPieceType(piece.type);
-  const overdue = isOverdue(piece.deadline) && piece.status !== 'publicado';
-  const assignedField = STAGE_ASSIGNED_FIELD[piece.status];
-  const assignedUser = assignedField ? piece[assignedField] : null;
+  const pl = PIECE_LABELS[piece.type] || piece.type;
+  const pc = PIECE_COLORS[piece.type] || C.txtS;
+  const od = isOverdue(piece.deadline) && piece.status !== 'publicado';
+  const af = ASSIGNED_FIELDS[piece.status];
+  const au = af ? piece[af] : null;
 
   return (
-    <div
-      onClick={() => onClick(piece)}
-      style={{
-        background: T.card,
-        border: `1px solid ${overdue ? T.danger + '55' : T.border}`,
-        borderRadius: T.radiusSm,
-        padding: '10px 12px',
-        cursor: 'pointer',
-        transition: 'all .15s ease',
-        position: 'relative',
-      }}
-      onMouseEnter={e => {
-        e.currentTarget.style.background = T.cardHov;
-        e.currentTarget.style.borderColor = overdue ? T.danger + '88' : T.borderLt;
-        e.currentTarget.style.transform = 'translateY(-1px)';
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.background = T.card;
-        e.currentTarget.style.borderColor = overdue ? T.danger + '55' : T.border;
-        e.currentTarget.style.transform = 'translateY(0)';
-      }}
+    <div onClick={() => onClick(piece)} style={{
+      background:C.card, border:`1px solid ${od ? C.red+'44' : C.brd}`, borderRadius:8,
+      padding:'10px 12px', cursor:'pointer', transition:'all .15s',
+    }}
+    onMouseEnter={e => { e.currentTarget.style.background = C.cardH; e.currentTarget.style.borderColor = od ? C.red+'66' : C.brdH; }}
+    onMouseLeave={e => { e.currentTarget.style.background = C.card; e.currentTarget.style.borderColor = od ? C.red+'44' : C.brd; }}
     >
-      {/* Type emoji + title */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 6 }}>
-        <span style={{ fontSize: 13, lineHeight: '18px' }}>{pt.emoji}</span>
-        <span style={{
-          fontSize: 12.5, fontWeight: 600, color: T.text, lineHeight: '18px',
-          overflow: 'hidden', textOverflow: 'ellipsis',
-          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-        }}>{piece.title}</span>
+      <div style={{ display:'flex', alignItems:'flex-start', gap:6, marginBottom:6 }}>
+        <span style={{ fontSize:9, padding:'2px 6px', borderRadius:4, background:`${pc}18`, color:pc, fontWeight:600, whiteSpace:'nowrap', marginTop:1 }}>{pl}</span>
+        <span style={{ fontSize:12.5, fontWeight:600, color:C.txt, lineHeight:'17px', overflow:'hidden', textOverflow:'ellipsis', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' }}>{piece.title}</span>
       </div>
-      {/* Bottom row */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{
-          fontSize: 11, color: overdue ? T.danger : T.muted, fontWeight: overdue ? 600 : 400,
-        }}>
-          {formatDeadline(piece.deadline)}
-        </span>
-        {assignedUser && <Avatar username={assignedUser} size={20} />}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        <span style={{ fontSize:11, color:od?C.red:C.txtM, fontWeight:od?600:400 }}>{fmtDeadline(piece.deadline)}</span>
+        {au && <Avatar username={au} size={20} />}
       </div>
     </div>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// KanbanColumn
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ── Column ──
 function KanbanColumn({ stage, pieces, onCardClick }) {
-  const count = pieces.length;
   return (
-    <div style={{
-      flex: '0 0 220px', display: 'flex', flexDirection: 'column',
-      background: T.bg, borderRadius: T.radius,
-      border: `1px solid ${T.border}`,
-      minHeight: 200, maxHeight: 'calc(100vh - 180px)',
-    }}>
-      {/* Header */}
-      <div style={{
-        padding: '10px 12px', borderBottom: `1px solid ${T.border}`,
-        display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
-      }}>
-        <span style={{
-          width: 8, height: 8, borderRadius: '50%',
-          background: stage.color, flexShrink: 0,
-        }} />
-        <span style={{ fontSize: 12.5, fontWeight: 700, color: T.text, letterSpacing: '.01em' }}>
-          {stage.label}
-        </span>
-        <span style={{
-          marginLeft: 'auto', fontSize: 11, fontWeight: 600,
-          color: T.muted, background: T.surface, padding: '1px 7px',
-          borderRadius: 10,
-        }}>{count}</span>
+    <div style={{ flex:'0 0 210px', display:'flex', flexDirection:'column', background:C.bg, borderRadius:10, border:`1px solid ${C.brd}`, minHeight:200, maxHeight:'calc(100vh - 170px)' }}>
+      <div style={{ padding:'10px 12px', borderBottom:`1px solid ${C.brd}`, display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+        <span style={{ width:8, height:8, borderRadius:'50%', background:stage.c }} />
+        <span style={{ fontSize:12, fontWeight:700, color:C.txt }}>{stage.l}</span>
+        <span style={{ marginLeft:'auto', fontSize:11, fontWeight:600, color:C.txtM, background:C.card, padding:'1px 7px', borderRadius:10 }}>{pieces.length}</span>
       </div>
-      {/* Cards */}
-      <div style={{
-        padding: 8, display: 'flex', flexDirection: 'column', gap: 6,
-        overflowY: 'auto', flex: 1,
-      }}>
-        {pieces.map(p => (
-          <PipelineCard key={p.id} piece={p} onClick={onCardClick} />
-        ))}
-        {count === 0 && (
-          <div style={{
-            padding: 20, textAlign: 'center', fontSize: 12,
-            color: T.muted, fontStyle: 'italic',
-          }}>Sin piezas</div>
-        )}
+      <div style={{ padding:6, display:'flex', flexDirection:'column', gap:5, overflowY:'auto', flex:1 }}>
+        {pieces.map(p => <PipelineCard key={p.id} piece={p} onClick={onCardClick} />)}
+        {pieces.length === 0 && <div style={{ padding:20, textAlign:'center', fontSize:12, color:C.txtM, fontStyle:'italic' }}>Sin piezas</div>}
       </div>
     </div>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// PieceDetailModal
-// ═══════════════════════════════════════════════════════════════════════════
-
-function PieceDetailModal({ piece, onClose, onUpdate, team }) {
-  const [localPiece, setLocalPiece] = useState({ ...piece });
+// ── Modal ──
+function PieceModal({ piece, onClose, onUpdate, team }) {
+  const [local, setLocal] = useState({ ...piece });
   const [tab, setTab] = useState(piece.status === 'pendiente' ? 'research' : piece.status);
 
-  useEffect(() => {
-    setLocalPiece({ ...piece });
-  }, [piece]);
+  useEffect(() => setLocal({ ...piece }), [piece]);
 
-  const handleAssign = (stageKey, username) => {
-    const field = STAGE_ASSIGNED_FIELD[stageKey];
-    if (!field) return;
-    const updated = { ...localPiece, [field]: username };
-    setLocalPiece(updated);
-    onUpdate(updated);
+  const handleAssign = (sk, u) => {
+    const f = ASSIGNED_FIELDS[sk]; if (!f) return;
+    const up = { ...local, [f]: u }; setLocal(up); onUpdate(up);
   };
-
-  const handleOutputChange = (stageKey, value) => {
-    const field = STAGE_OUTPUT_FIELD[stageKey];
-    if (!field) return;
-    setLocalPiece(prev => ({ ...prev, [field]: value }));
+  const handleOutput = (sk, v) => {
+    const f = OUTPUT_FIELDS[sk]; if (!f) return;
+    setLocal(prev => ({ ...prev, [f]: v }));
   };
-
-  const handleAdvance = (stageKey) => {
-    const next = getNextStage(stageKey);
-    if (!next) return;
-    const outputField = STAGE_OUTPUT_FIELD[stageKey];
-    const updated = { ...localPiece, status: next.key };
-    if (outputField) updated[outputField] = localPiece[outputField];
-    setLocalPiece(updated);
-    onUpdate(updated);
-    setTab(next.key);
+  const handleAdvance = (sk) => {
+    const ns = nextStage(sk); if (!ns) return;
+    const up = { ...local, status: ns.k }; setLocal(up); onUpdate(up); setTab(ns.k);
   };
+  const handleSave = () => onUpdate(local);
 
-  const handleSaveOutput = (stageKey) => {
-    onUpdate(localPiece);
-  };
-
-  const pt = getPieceType(localPiece.type);
-  const activeStages = STAGES.filter(s => s.key !== 'pendiente');
+  const pt = PIECE_LABELS[local.type] || local.type;
+  const pc = PIECE_COLORS[local.type] || C.txtS;
+  const sg = getStage(local.status);
+  const od = isOverdue(local.deadline) && local.status !== 'publicado';
+  const activeTabs = KANBAN_STAGES.filter(s => s.k !== 'pendiente');
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 1000,
-      background: 'rgba(0,0,0,.7)', backdropFilter: 'blur(8px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: 20,
-    }} onClick={onClose}>
-      <div style={{
-        background: T.surface, borderRadius: T.radiusLg,
-        border: `1px solid ${T.borderLt}`,
-        width: '100%', maxWidth: 720, maxHeight: '85vh',
-        display: 'flex', flexDirection: 'column',
-        boxShadow: T.shadow,
-      }} onClick={e => e.stopPropagation()}>
+    <div onClick={onClose} style={{ position:'fixed', inset:0, zIndex:1000, background:'rgba(0,0,0,.7)', backdropFilter:'blur(8px)', display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background:C.cardH, borderRadius:14, border:`1px solid ${C.brdH}`, width:'100%', maxWidth:700, maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 4px 24px rgba(0,0,0,.4)' }}>
         {/* Header */}
-        <div style={{
-          padding: '18px 24px', borderBottom: `1px solid ${T.border}`,
-          display: 'flex', alignItems: 'flex-start', gap: 12,
-        }}>
-          <span style={{ fontSize: 22 }}>{pt.emoji}</span>
-          <div style={{ flex: 1 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 700, color: T.white, margin: 0 }}>
-              {localPiece.title}
-            </h2>
-            <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-              <Badge color={T.textDim}>{pt.label}</Badge>
-              <StageIndicator stageKey={localPiece.status} />
-              {isOverdue(localPiece.deadline) && localPiece.status !== 'publicado' && (
-                <Badge color={T.danger}>Atrasada</Badge>
-              )}
-              <span style={{ fontSize: 12, color: T.muted, alignSelf: 'center' }}>
-                Deadline: {formatDeadline(localPiece.deadline)}
-              </span>
+        <div style={{ padding:'18px 24px', borderBottom:`1px solid ${C.brd}`, display:'flex', alignItems:'flex-start', gap:12 }}>
+          <div style={{ flex:1 }}>
+            <h2 style={{ fontSize:16, fontWeight:700, color:C.wh, margin:0 }}>{local.title}</h2>
+            <div style={{ display:'flex', gap:8, marginTop:6, flexWrap:'wrap', alignItems:'center' }}>
+              <Badge color={pc}>{pt}</Badge>
+              <Badge color={sg.c}>{sg.l}</Badge>
+              {od && <Badge color={C.red}>Atrasada</Badge>}
+              <span style={{ fontSize:12, color:C.txtM }}>Deadline: {fmtDeadline(local.deadline)}</span>
             </div>
           </div>
-          <button onClick={onClose} style={{
-            background: 'none', border: 'none', color: T.muted, fontSize: 20,
-            cursor: 'pointer', padding: 4, lineHeight: 1,
-          }}>✕</button>
+          <button onClick={onClose} style={{ background:'none', border:'none', color:C.txtM, fontSize:20, cursor:'pointer', padding:4 }}>✕</button>
         </div>
 
-        {/* Stage tabs */}
-        <div style={{
-          display: 'flex', gap: 0, borderBottom: `1px solid ${T.border}`,
-          overflowX: 'auto', flexShrink: 0,
-        }}>
-          {activeStages.map(s => {
-            const isActive = tab === s.key;
-            const stageIdx = STAGE_KEYS.indexOf(s.key);
-            const currentIdx = STAGE_KEYS.indexOf(localPiece.status);
-            const isPast = stageIdx < currentIdx;
-            const isCurrent = stageIdx === currentIdx;
-            const outputField = STAGE_OUTPUT_FIELD[s.key];
-            const hasOutput = outputField && localPiece[outputField];
-
+        {/* Tabs */}
+        <div style={{ display:'flex', borderBottom:`1px solid ${C.brd}`, overflowX:'auto', flexShrink:0 }}>
+          {activeTabs.map(s => {
+            const isAct = tab === s.k;
+            const si = STAGE_KEYS.indexOf(s.k), ci = STAGE_KEYS.indexOf(local.status);
+            const isPast = si < ci, isCur = si === ci;
+            const of2 = OUTPUT_FIELDS[s.k], ho = of2 && local[of2];
             return (
-              <button key={s.key} onClick={() => setTab(s.key)} style={{
-                background: isActive ? T.card : 'transparent',
-                border: 'none', borderBottom: isActive ? `2px solid ${s.color}` : '2px solid transparent',
-                color: isActive ? T.white : isPast ? T.muted : isCurrent ? T.text : T.muted + '88',
-                padding: '10px 14px', fontSize: 11.5, fontWeight: 600,
-                cursor: 'pointer', whiteSpace: 'nowrap',
-                display: 'flex', alignItems: 'center', gap: 5,
-                transition: 'all .15s ease',
+              <button key={s.k} onClick={() => setTab(s.k)} style={{
+                background: isAct ? C.card : 'transparent',
+                border:'none', borderBottom: isAct ? `2px solid ${s.c}` : '2px solid transparent',
+                color: isAct ? C.wh : C.txtM, padding:'10px 14px', fontSize:11.5, fontWeight:600,
+                cursor:'pointer', whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:5, fontFamily:'inherit',
               }}>
-                {isPast && hasOutput && <span style={{ color: T.accent, fontSize: 12 }}>✓</span>}
-                {isCurrent && <span style={{ width: 5, height: 5, borderRadius: '50%', background: s.color }} />}
-                {s.label}
+                {isPast && ho && <span style={{ color:C.teal, fontSize:12 }}>✓</span>}
+                {isCur && <span style={{ width:5, height:5, borderRadius:'50%', background:s.c }} />}
+                {s.l}
               </button>
             );
           })}
         </div>
 
-        {/* Stage content */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
-          <StagePanel
-            stageKey={tab}
-            piece={localPiece}
-            team={team}
-            onAssign={handleAssign}
-            onOutputChange={handleOutputChange}
-            onAdvance={handleAdvance}
-            onSave={handleSaveOutput}
-          />
+        {/* Body */}
+        <div style={{ flex:1, overflowY:'auto', padding:24 }}>
+          <StagePanel stageKey={tab} piece={local} team={team} onAssign={handleAssign} onOutput={handleOutput} onAdvance={handleAdvance} onSave={handleSave} />
         </div>
       </div>
     </div>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// StagePanel  (content for each stage tab in modal)
-// ═══════════════════════════════════════════════════════════════════════════
-
-function StagePanel({ stageKey, piece, team, onAssign, onOutputChange, onAdvance, onSave }) {
-  const stage = getStage(stageKey);
-  const assignedField = STAGE_ASSIGNED_FIELD[stageKey];
-  const outputField = STAGE_OUTPUT_FIELD[stageKey];
-  const outputType = STAGE_OUTPUT_TYPE[stageKey];
-  const assigned = assignedField ? piece[assignedField] : null;
-  const output = outputField ? piece[outputField] : null;
-
-  const currentIdx = STAGE_KEYS.indexOf(piece.status);
-  const thisIdx = STAGE_KEYS.indexOf(stageKey);
-  const isCurrent = thisIdx === currentIdx;
-  const isPast = thisIdx < currentIdx;
-  const isFuture = thisIdx > currentIdx;
-
-  const canAdvance = isCurrent && output;
-
-  const inputStyle = {
-    width: '100%', background: T.card, border: `1px solid ${T.border}`,
-    borderRadius: T.radiusSm, color: T.text, padding: '10px 14px',
-    fontSize: 13, fontFamily: T.font, outline: 'none', resize: 'vertical',
-  };
-
-  const btnStyle = (primary) => ({
-    padding: '8px 18px', borderRadius: T.radiusSm, border: 'none',
-    fontSize: 13, fontWeight: 600, cursor: 'pointer',
-    background: primary ? T.accent : T.card,
-    color: primary ? '#0A0A0A' : T.text,
-    transition: 'opacity .15s',
-  });
+// ── Stage Panel ──
+function StagePanel({ stageKey, piece, team, onAssign, onOutput, onAdvance, onSave }) {
+  const af = ASSIGNED_FIELDS[stageKey], of2 = OUTPUT_FIELDS[stageKey], ot = OUTPUT_TYPES[stageKey];
+  const assigned = af ? piece[af] : null;
+  const output = of2 ? piece[of2] : null;
+  const ci = STAGE_KEYS.indexOf(piece.status), ti = STAGE_KEYS.indexOf(stageKey);
+  const isCur = ti === ci, isPast = ti < ci, isFut = ti > ci;
+  const ns = nextStage(stageKey);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {/* Assigned person */}
-      {assignedField && (
+    <div style={{ display:'flex', flexDirection:'column', gap:18 }}>
+      {/* Assigned */}
+      {af && (
         <div>
-          <label style={{ fontSize: 11, fontWeight: 600, color: T.muted, textTransform: 'uppercase', letterSpacing: '.06em' }}>
-            Responsable
-          </label>
-          <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+          <div style={{ fontSize:11, fontWeight:600, color:C.txtM, textTransform:'uppercase', letterSpacing:'.06em', marginBottom:8 }}>Responsable</div>
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
             {team.map(m => {
-              const isSelected = assigned === m.username;
+              const sel = assigned === m.username;
+              const rc = ROLE_COLORS[m.role] || C.txtS;
               return (
                 <button key={m.username} onClick={() => onAssign(stageKey, m.username)} style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '5px 12px 5px 6px', borderRadius: 20,
-                  background: isSelected ? `${T.accent}22` : T.card,
-                  border: `1.5px solid ${isSelected ? T.accent : T.border}`,
-                  color: isSelected ? T.accent : T.textDim,
-                  fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                  transition: 'all .15s',
+                  display:'flex', alignItems:'center', gap:6, padding:'5px 12px 5px 6px', borderRadius:20,
+                  background: sel ? `${rc}22` : C.card, border:`1.5px solid ${sel ? rc : C.brd}`,
+                  color: sel ? rc : C.txtS, fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit',
                 }}>
                   <Avatar username={m.username} size={20} />
-                  {m.display}
+                  {m.display_name}
                 </button>
               );
             })}
@@ -477,327 +276,159 @@ function StagePanel({ stageKey, piece, team, onAssign, onOutputChange, onAdvance
         </div>
       )}
 
-      {/* Output section */}
-      {outputField && (
+      {/* Output */}
+      {of2 && (
         <div>
-          <label style={{ fontSize: 11, fontWeight: 600, color: T.muted, textTransform: 'uppercase', letterSpacing: '.06em' }}>
-            Output {isPast && output ? '✓' : isCurrent ? '(requerido para avanzar)' : ''}
-          </label>
-
-          <div style={{ marginTop: 8 }}>
-            {/* Research: URL + comment */}
-            {outputType === 'url+text' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <input
-                  type="url"
-                  placeholder="URL de referencia viral (Instagram, TikTok…)"
-                  value={piece.research_output || ''}
-                  onChange={e => onOutputChange(stageKey, e.target.value)}
-                  disabled={!isCurrent}
-                  style={{ ...inputStyle, opacity: isCurrent ? 1 : 0.6 }}
-                />
-                <textarea
-                  placeholder="¿Por qué funciona esta referencia? Hook, formato, CTA…"
-                  value={piece.research_comment || ''}
-                  rows={3}
-                  disabled={!isCurrent}
-                  style={{ ...inputStyle, opacity: isCurrent ? 1 : 0.6 }}
-                  onChange={e => {
-                    // store comment alongside output
-                  }}
-                />
-              </div>
-            )}
-
-            {/* Guión: text bullets */}
-            {outputType === 'text' && (
-              <textarea
-                placeholder="• Abre con pregunta provocativa&#10;• Muestra resultado en 3 segundos&#10;• CTA directo"
-                value={output || ''}
-                rows={6}
-                onChange={e => onOutputChange(stageKey, e.target.value)}
-                disabled={!isCurrent}
-                style={{ ...inputStyle, opacity: isCurrent ? 1 : 0.6, fontFamily: 'monospace', lineHeight: 1.7 }}
-              />
-            )}
-
-            {/* Grabación / Edición: file upload */}
-            {outputType === 'file' && (
-              <div>
-                {output ? (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '10px 14px', background: T.card, borderRadius: T.radiusSm,
-                    border: `1px solid ${T.border}`,
-                  }}>
-                    <span style={{ fontSize: 20 }}>📎</span>
-                    <span style={{ fontSize: 13, color: T.text, flex: 1 }}>{output}</span>
-                    {isCurrent && (
-                      <button onClick={() => onOutputChange(stageKey, null)} style={{
-                        background: 'none', border: 'none', color: T.danger,
-                        fontSize: 12, cursor: 'pointer', fontWeight: 600,
-                      }}>Quitar</button>
-                    )}
-                  </div>
-                ) : (
-                  <label style={{
-                    display: 'flex', flexDirection: 'column', alignItems: 'center',
-                    justifyContent: 'center', gap: 8,
-                    padding: '28px 20px', background: T.card,
-                    border: `2px dashed ${isCurrent ? T.borderLt : T.border}`,
-                    borderRadius: T.radiusSm,
-                    cursor: isCurrent ? 'pointer' : 'default',
-                    opacity: isCurrent ? 1 : 0.5,
-                    transition: 'border-color .15s',
-                  }}>
-                    <span style={{ fontSize: 28, opacity: 0.5 }}>📤</span>
-                    <span style={{ fontSize: 12, color: T.muted }}>
-                      {isCurrent ? 'Clic para subir archivo' : 'Archivo pendiente'}
-                    </span>
-                    {isCurrent && (
-                      <input type="file" style={{ display: 'none' }} onChange={e => {
-                        const file = e.target.files?.[0];
-                        if (file) onOutputChange(stageKey, file.name);
-                      }} />
-                    )}
-                  </label>
-                )}
-              </div>
-            )}
-
-            {/* Aprobación / Rev cliente */}
-            {outputType === 'approval' && (
-              <div>
-                {output === 'approved' ? (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '12px 16px', background: `${T.accent}12`,
-                    borderRadius: T.radiusSm, border: `1px solid ${T.accent}33`,
-                  }}>
-                    <span style={{ fontSize: 18 }}>✅</span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: T.accent }}>Aprobado</span>
-                  </div>
-                ) : output === 'rejected' ? (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '12px 16px', background: `${T.danger}12`,
-                    borderRadius: T.radiusSm, border: `1px solid ${T.danger}33`,
-                  }}>
-                    <span style={{ fontSize: 18 }}>❌</span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: T.danger }}>Rechazado — requiere cambios</span>
-                  </div>
-                ) : isCurrent ? (
-                  <div style={{ display: 'flex', gap: 10 }}>
-                    <button onClick={() => { onOutputChange(stageKey, 'approved'); }} style={{
-                      ...btnStyle(true), display: 'flex', alignItems: 'center', gap: 6,
-                    }}>
-                      ✓ Aprobar
-                    </button>
-                    <button onClick={() => { onOutputChange(stageKey, 'rejected'); }} style={{
-                      ...btnStyle(false), borderColor: T.danger, color: T.danger,
-                      border: `1px solid ${T.danger}44`,
-                    }}>
-                      ✕ Rechazar
-                    </button>
-                  </div>
-                ) : (
-                  <span style={{ fontSize: 12, color: T.muted, fontStyle: 'italic' }}>
-                    Pendiente de revisión
-                  </span>
-                )}
-              </div>
-            )}
+          <div style={{ fontSize:11, fontWeight:600, color:C.txtM, textTransform:'uppercase', letterSpacing:'.06em', marginBottom:8 }}>
+            Output {isPast && output ? '✓' : isCur ? '(requerido para avanzar)' : ''}
           </div>
+          {ot === 'url' && (
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              <input type="url" placeholder="URL de referencia viral" value={piece.research_output||''} onChange={e => onOutput(stageKey, e.target.value)} disabled={!isCur} style={{ ...S.inp, opacity:isCur?1:.6 }} />
+              <textarea placeholder="¿Por qué funciona esta referencia?" value={piece.research_comment||''} rows={3} disabled={!isCur} style={{ ...S.inp, opacity:isCur?1:.6 }} />
+            </div>
+          )}
+          {ot === 'text' && (
+            <textarea placeholder="• Abre con pregunta&#10;• Muestra resultado&#10;• CTA directo" value={output||''} rows={6} onChange={e => onOutput(stageKey, e.target.value)} disabled={!isCur} style={{ ...S.inp, opacity:isCur?1:.6, fontFamily:'monospace', lineHeight:1.7 }} />
+          )}
+          {ot === 'file' && (
+            output ? (
+              <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:C.card, borderRadius:8, border:`1px solid ${C.brd}` }}>
+                <span style={{ fontSize:20 }}>📎</span>
+                <span style={{ fontSize:13, color:C.txt, flex:1 }}>{output}</span>
+                {isCur && <button onClick={() => onOutput(stageKey, null)} style={{ background:'none', border:'none', color:C.red, fontSize:12, cursor:'pointer', fontWeight:600, fontFamily:'inherit' }}>Quitar</button>}
+              </div>
+            ) : (
+              <label style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:8, padding:'28px 20px', background:C.card, border:`2px dashed ${isCur?C.brdH:C.brd}`, borderRadius:8, cursor:isCur?'pointer':'default', opacity:isCur?1:.5 }}>
+                <span style={{ fontSize:28, opacity:.5 }}>📤</span>
+                <span style={{ fontSize:12, color:C.txtM }}>{isCur ? 'Clic para subir archivo' : 'Archivo pendiente'}</span>
+                {isCur && <input type="file" style={{ display:'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) onOutput(stageKey, f.name); }} />}
+              </label>
+            )
+          )}
+          {ot === 'approval' && (
+            output === 'approved' ? (
+              <div style={{ display:'flex', alignItems:'center', gap:8, padding:'12px 16px', background:C.tealDim, borderRadius:8, border:`1px solid ${C.teal}33` }}>
+                <span style={{ fontSize:18 }}>✅</span><span style={{ fontSize:13, fontWeight:600, color:C.teal }}>Aprobado</span>
+              </div>
+            ) : output === 'rejected' ? (
+              <div style={{ display:'flex', alignItems:'center', gap:8, padding:'12px 16px', background:C.redDim, borderRadius:8, border:`1px solid ${C.red}33` }}>
+                <span style={{ fontSize:18 }}>❌</span><span style={{ fontSize:13, fontWeight:600, color:C.red }}>Rechazado</span>
+              </div>
+            ) : isCur ? (
+              <div style={{ display:'flex', gap:10 }}>
+                <button onClick={() => onOutput(stageKey, 'approved')} style={{ padding:'8px 18px', borderRadius:8, border:'none', background:C.acc, color:C.accTxt, fontSize:13, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>✓ Aprobar</button>
+                <button onClick={() => onOutput(stageKey, 'rejected')} style={{ padding:'8px 18px', borderRadius:8, border:`1px solid ${C.red}44`, background:'transparent', color:C.red, fontSize:13, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>✕ Rechazar</button>
+              </div>
+            ) : <span style={{ fontSize:12, color:C.txtM, fontStyle:'italic' }}>Pendiente de revisión</span>
+          )}
         </div>
       )}
 
       {/* Actions */}
-      <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-        {isCurrent && outputField && (
-          <button onClick={() => onSave(stageKey)} style={btnStyle(false)}>
-            Guardar
-          </button>
-        )}
-        {canAdvance && (
-          <button onClick={() => onAdvance(stageKey)} style={btnStyle(true)}>
-            Avanzar a {getNextStage(stageKey)?.label} →
-          </button>
-        )}
-        {isFuture && (
-          <span style={{ fontSize: 12, color: T.muted, fontStyle: 'italic', alignSelf: 'center' }}>
-            Esta etapa aún no está activa
-          </span>
-        )}
+      <div style={{ display:'flex', gap:10, marginTop:8 }}>
+        {isCur && of2 && <button onClick={onSave} style={{ padding:'8px 18px', borderRadius:8, border:'none', background:C.card, color:C.txt, fontSize:13, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>Guardar</button>}
+        {isCur && output && ns && <button onClick={() => onAdvance(stageKey)} style={{ padding:'8px 18px', borderRadius:8, border:'none', background:C.acc, color:C.accTxt, fontSize:13, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>Avanzar a {ns.l} →</button>}
+        {isFut && <span style={{ fontSize:12, color:C.txtM, fontStyle:'italic', alignSelf:'center' }}>Esta etapa aún no está activa</span>}
       </div>
     </div>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// MAIN PAGE: /pipeline
+// Main Page
 // ═══════════════════════════════════════════════════════════════════════════
-
 export default function PipelinePage() {
-  const [clients] = useState(DEMO_CLIENTS);
+  const router = useRouter();
+  const [session, setSessionState] = useState(null);
+  const [clients, setClients] = useState(DEMO_CLIENTS);
+  const [team, setTeamState] = useState(DEMO_TEAM);
   const [selectedClient, setSelectedClient] = useState(DEMO_CLIENTS[0].id);
-  const [selectedMonth, setSelectedMonth] = useState('2026-03');
+  const [selectedMonth, setSelectedMonth] = useState(CURRENT_PERIOD);
   const [pieces, setPieces] = useState([]);
-  const [modalPiece, setModalPiece] = useState(null);
-  const [team] = useState(DEMO_TEAM);
-  const kanbanRef = useRef(null);
+  const [modal, setModal] = useState(null);
 
-  // Load pieces when client changes
   useEffect(() => {
-    const data = makeDemoPieces(selectedClient);
-    setPieces(data.filter(p => p.month === selectedMonth));
-  }, [selectedClient, selectedMonth]);
+    const s = getSession();
+    if (!s?.user || !isAdmin(s.user)) { router.push('/'); return; }
+    setSessionState(s);
+    loadData();
+  }, []);
 
-  const handleCardClick = (piece) => setModalPiece(piece);
+  useEffect(() => { loadPieces(); }, [selectedClient, selectedMonth]);
 
-  const handleUpdatePiece = (updated) => {
+  async function loadData() {
+    try {
+      const { data: cl } = await supabase.from('clients').select('*');
+      if (cl?.length) setClients(cl);
+      const { data: tm } = await supabase.from('team_users').select('*');
+      if (tm?.length) setTeamState(tm);
+    } catch {}
+    loadPieces();
+  }
+
+  async function loadPieces() {
+    try {
+      const { data } = await supabase.from('content_pieces').select('*').eq('client_id', selectedClient).eq('period', selectedMonth);
+      if (data?.length) { setPieces(data); return; }
+    } catch {}
+    setPieces(makeDemoPieces(selectedClient));
+  }
+
+  const handleUpdate = (updated) => {
     setPieces(prev => prev.map(p => p.id === updated.id ? updated : p));
-    setModalPiece(updated);
+    setModal(updated);
   };
 
-  const clientName = clients.find(c => c.id === selectedClient)?.name || '';
-  const months = getMonthOptions();
-
-  // Stats
   const total = pieces.length;
   const published = pieces.filter(p => p.status === 'publicado').length;
   const overdue = pieces.filter(p => isOverdue(p.deadline) && p.status !== 'publicado').length;
+  const pct = total ? Math.round((published / total) * 100) : 0;
+  const months = getMonths();
 
-  const selectStyle = {
-    background: T.card, border: `1px solid ${T.border}`,
-    borderRadius: T.radiusSm, color: T.text, padding: '8px 14px',
-    fontSize: 13, fontWeight: 600, fontFamily: T.font,
-    cursor: 'pointer', outline: 'none',
-    appearance: 'none', WebkitAppearance: 'none',
-    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23666' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E")`,
-    backgroundRepeat: 'no-repeat',
-    backgroundPosition: 'right 10px center',
-    paddingRight: 30,
-  };
+  if (!session) return null;
 
   return (
-    <div style={{
-      minHeight: '100vh', background: T.bg, color: T.text,
-      fontFamily: T.font, padding: '0',
-    }}>
-      {/* Top bar */}
-      <header style={{
-        padding: '16px 28px',
-        borderBottom: `1px solid ${T.border}`,
-        display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
-      }}>
-        {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 8 }}>
-          <span style={{
-            fontSize: 18, fontWeight: 800, color: T.accent,
-            letterSpacing: '-.02em',
-          }}>e.32o</span>
-          <span style={{
-            fontSize: 11, color: T.muted, fontWeight: 500,
-            padding: '2px 8px', background: T.surface, borderRadius: 4,
-          }}>Pipeline</span>
-        </div>
+    <div style={{ minHeight:'100vh', background:C.bg, fontFamily:"'DM Sans', sans-serif" }}>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+      <NavHeader />
 
-        {/* Client selector */}
-        <select
-          value={selectedClient}
-          onChange={e => setSelectedClient(e.target.value)}
-          style={selectStyle}
-        >
-          {clients.map(c => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
+      {/* Toolbar */}
+      <div style={{ padding:'14px 28px', display:'flex', alignItems:'center', gap:14, borderBottom:`1px solid ${C.brd}`, flexWrap:'wrap' }}>
+        <select value={selectedClient} onChange={e => setSelectedClient(e.target.value)} style={S.sel}>
+          {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} style={S.sel}>
+          {months.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}
         </select>
 
-        {/* Month selector */}
-        <select
-          value={selectedMonth}
-          onChange={e => setSelectedMonth(e.target.value)}
-          style={selectStyle}
-        >
-          {months.map(m => (
-            <option key={m.value} value={m.value}>{m.label}</option>
-          ))}
-        </select>
-
-        {/* Quick stats */}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 16, alignItems: 'center' }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 18, fontWeight: 800, color: T.white }}>{total}</div>
-            <div style={{ fontSize: 10, color: T.muted, fontWeight: 500 }}>Piezas</div>
-          </div>
-          <div style={{ width: 1, height: 28, background: T.border }} />
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 18, fontWeight: 800, color: T.accent }}>{published}</div>
-            <div style={{ fontSize: 10, color: T.muted, fontWeight: 500 }}>Publicadas</div>
-          </div>
-          {overdue > 0 && (
-            <>
-              <div style={{ width: 1, height: 28, background: T.border }} />
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 18, fontWeight: 800, color: T.danger }}>{overdue}</div>
-                <div style={{ fontSize: 10, color: T.muted, fontWeight: 500 }}>Atrasadas</div>
-              </div>
-            </>
-          )}
+        <div style={{ marginLeft:'auto', display:'flex', gap:16, alignItems:'center' }}>
+          <div style={{ textAlign:'center' }}><div style={{ fontSize:18, fontWeight:800, color:C.wh }}>{total}</div><div style={{ fontSize:10, color:C.txtM }}>Piezas</div></div>
+          <div style={{ width:1, height:24, background:C.brd }} />
+          <div style={{ textAlign:'center' }}><div style={{ fontSize:18, fontWeight:800, color:C.acc }}>{published}</div><div style={{ fontSize:10, color:C.txtM }}>Publicadas</div></div>
+          {overdue > 0 && <>
+            <div style={{ width:1, height:24, background:C.brd }} />
+            <div style={{ textAlign:'center' }}><div style={{ fontSize:18, fontWeight:800, color:C.red }}>{overdue}</div><div style={{ fontSize:10, color:C.txtM }}>Atrasadas</div></div>
+          </>}
         </div>
-      </header>
-
-      {/* Progress bar */}
-      <div style={{ padding: '12px 28px 0', display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div style={{
-          flex: 1, height: 4, background: T.surface, borderRadius: 2, overflow: 'hidden',
-        }}>
-          <div style={{
-            height: '100%', borderRadius: 2,
-            width: total ? `${(published / total) * 100}%` : '0%',
-            background: `linear-gradient(90deg, ${T.accentDk}, ${T.accent})`,
-            transition: 'width .4s ease',
-          }} />
-        </div>
-        <span style={{ fontSize: 11, color: T.muted, fontWeight: 600, whiteSpace: 'nowrap' }}>
-          {total ? Math.round((published / total) * 100) : 0}% completado
-        </span>
       </div>
 
-      {/* Kanban board */}
-      <div ref={kanbanRef} style={{
-        display: 'flex', gap: 10, padding: '16px 28px 28px',
-        overflowX: 'auto', alignItems: 'flex-start',
-      }}>
-        {STAGES.map(stage => (
-          <KanbanColumn
-            key={stage.key}
-            stage={stage}
-            pieces={pieces.filter(p => p.status === stage.key)}
-            onCardClick={handleCardClick}
-          />
+      {/* Progress */}
+      <div style={{ padding:'10px 28px 0', display:'flex', alignItems:'center', gap:12 }}>
+        <div style={{ flex:1, height:4, background:C.card, borderRadius:2, overflow:'hidden' }}>
+          <div style={{ height:'100%', borderRadius:2, width:`${pct}%`, background:`linear-gradient(90deg, ${C.teal}, ${C.acc})`, transition:'width .4s ease' }} />
+        </div>
+        <span style={{ fontSize:11, color:C.txtM, fontWeight:600 }}>{pct}% completado</span>
+      </div>
+
+      {/* Kanban */}
+      <div style={{ display:'flex', gap:10, padding:'14px 28px 28px', overflowX:'auto', alignItems:'flex-start' }}>
+        {KANBAN_STAGES.map(s => (
+          <KanbanColumn key={s.k} stage={s} pieces={pieces.filter(p => p.status === s.k)} onCardClick={setModal} />
         ))}
       </div>
 
-      {/* Modal */}
-      {modalPiece && (
-        <PieceDetailModal
-          piece={modalPiece}
-          onClose={() => setModalPiece(null)}
-          onUpdate={handleUpdatePiece}
-          team={team}
-        />
-      )}
-
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
-        * { box-sizing: border-box; margin: 0; }
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: ${T.border}; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: ${T.borderLt}; }
-        select option { background: ${T.surface}; color: ${T.text}; }
-      `}</style>
+      {modal && <PieceModal piece={modal} onClose={() => setModal(null)} onUpdate={handleUpdate} team={team} />}
     </div>
   );
 }
