@@ -504,6 +504,156 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// CLIENT VIEW — what the client sees, but founder can edit
+// ═══════════════════════════════════════════════════════════════════════════
+function ClientView({ pieces, onPieceClick, calMonth, setCalMonth }) {
+  const year = calMonth.getFullYear(), month = calMonth.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthName = calMonth.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+  const today = new Date();
+
+  const total = pieces.length;
+  const published = pieces.filter(p => p.status === 'publicado').length;
+  const inReview = pieces.filter(p => p.status === 'revision_cliente').length;
+  const inProgress = pieces.filter(p => !['publicado', 'revision_cliente', 'pendiente'].includes(p.status)).length;
+  const pending = pieces.filter(p => p.status === 'pendiente').length;
+  const pctDone = total > 0 ? Math.round((published / total) * 100) : 0;
+
+  const statusC = { pendiente: C.txtM, research: C.txtM, guion: C.blue, aprobacion: C.amb, grabacion: C.cor, edicion: C.purp, revision_cliente: C.amb, publicado: C.teal };
+  const statusL = { pendiente: 'Pendiente', research: 'Research', guion: 'Guión', aprobacion: 'Aprobación', grabacion: 'Grabación', edicion: 'Edición', revision_cliente: 'Rev. cliente', publicado: 'Publicado' };
+
+  const piecesByDay = useMemo(() => {
+    const map = {};
+    pieces.forEach(p => {
+      if (!p.deadline) return;
+      const d = new Date(p.deadline + 'T12:00:00');
+      if (d.getMonth() === month && d.getFullYear() === year) {
+        const day = d.getDate();
+        if (!map[day]) map[day] = [];
+        map[day].push(p);
+      }
+    });
+    return map;
+  }, [pieces, month, year]);
+
+  const dayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+        <span style={{ fontSize: 14, color: C.txtM }}>👁 Vista del cliente — lo que ve tu cliente ahora</span>
+      </div>
+
+      {/* Progress bar */}
+      <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 12, padding: '16px 18px', marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: C.wh }}>Entrega del mes</span>
+          <span style={{ fontSize: 22, fontWeight: 800, color: C.acc }}>{pctDone}%</span>
+        </div>
+        <div style={{ height: 8, background: C.bg, borderRadius: 4, overflow: 'hidden', display: 'flex' }}>
+          {published > 0 && <div style={{ width: `${(published / total) * 100}%`, background: C.teal, transition: 'width .4s' }} />}
+          {inReview > 0 && <div style={{ width: `${(inReview / total) * 100}%`, background: C.amb, transition: 'width .4s' }} />}
+          {inProgress > 0 && <div style={{ width: `${(inProgress / total) * 100}%`, background: C.blue, transition: 'width .4s' }} />}
+        </div>
+        <div style={{ display: 'flex', gap: 14, marginTop: 8, flexWrap: 'wrap' }}>
+          {[
+            { l: `${published} publicadas`, c: C.teal },
+            { l: `${inReview} rev. cliente`, c: C.amb },
+            { l: `${inProgress} en proceso`, c: C.blue },
+            { l: `${pending} pendientes`, c: C.txtM },
+          ].map(x => (
+            <div key={x.l} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: x.c }} />
+              <span style={{ fontSize: 11, color: C.txtS }}>{x.l}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Calendar */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <button onClick={() => setCalMonth(new Date(year, month - 1, 1))} style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 6, padding: '6px 10px', color: C.txtM, cursor: 'pointer', fontSize: 16 }}>‹</button>
+        <span style={{ fontSize: 16, fontWeight: 700, color: C.wh, textTransform: 'capitalize' }}>{monthName}</span>
+        <button onClick={() => setCalMonth(new Date(year, month + 1, 1))} style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 6, padding: '6px 10px', color: C.txtM, cursor: 'pointer', fontSize: 16 }}>›</button>
+      </div>
+
+      <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', borderBottom: `1px solid ${C.brd}` }}>
+          {dayNames.map(d => <div key={d} style={{ padding: '8px 4px', textAlign: 'center', fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.5px' }}>{d}</div>)}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)' }}>
+          {cells.map((day, i) => {
+            const isToday = day && today.getDate() === day && today.getMonth() === month && today.getFullYear() === year;
+            const dp = day ? piecesByDay[day] || [] : [];
+            return (
+              <div key={i} style={{ minHeight: 76, padding: 3, borderRight: (i + 1) % 7 !== 0 ? `1px solid ${C.brd}` : 'none', borderBottom: `1px solid ${C.brd}` }}>
+                {day && (
+                  <>
+                    <div style={{ fontSize: 11, fontWeight: isToday ? 800 : 500, color: isToday ? C.acc : C.txtM, padding: '2px 4px', ...(isToday ? { background: C.accDim, borderRadius: 3, display: 'inline-block' } : {}) }}>{day}</div>
+                    {dp.map(p => {
+                      const sc = statusC[p.status] || C.txtM;
+                      const pl = PIECE_LABELS[p.type] || p.type;
+                      const hasFile = !!(OF[p.status] && p[OF[p.status]]);
+                      return (
+                        <div key={p.id} onClick={() => onPieceClick(p)} style={{
+                          margin: '1px 0', padding: '2px 4px', borderRadius: 3,
+                          fontSize: 9, fontWeight: 600, color: sc, background: `${sc}12`,
+                          cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          borderLeft: hasFile ? `2px solid ${sc}` : 'none',
+                          transition: 'background .1s',
+                        }}
+                          onMouseEnter={e => e.currentTarget.style.background = `${sc}25`}
+                          onMouseLeave={e => e.currentTarget.style.background = `${sc}12`}
+                          title={`${p.title} — ${statusL[p.status] || p.status}`}
+                        >
+                          {pl}
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Upcoming / needs attention list */}
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>Piezas por entregar</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {pieces.filter(p => p.status !== 'publicado' && p.status !== 'pendiente').sort((a, b) => (a.deadline || '').localeCompare(b.deadline || '')).slice(0, 10).map(p => {
+          const sc = statusC[p.status] || C.txtM;
+          const pl = PIECE_LABELS[p.type] || p.type;
+          return (
+            <div key={p.id} onClick={() => onPieceClick(p)} style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
+              background: C.card, border: `1px solid ${C.brd}`, borderRadius: 8,
+              cursor: 'pointer', transition: 'border-color .12s',
+            }}
+              onMouseEnter={e => e.currentTarget.style.borderColor = C.brdH}
+              onMouseLeave={e => e.currentTarget.style.borderColor = C.brd}
+            >
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: sc, flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.title}</div>
+                <div style={{ fontSize: 11, color: C.txtM }}>{pl} · {STAGE_LABELS[p.status] || p.status}</div>
+              </div>
+              <span style={{ fontSize: 12, color: C.txtM, flexShrink: 0 }}>{fmtDl(p.deadline)}</span>
+              <span style={{ fontSize: 14, color: C.txtM }}>›</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ═══════════════════════════════════════════════════════════════════════════
 export default function PipelinePage() {
@@ -517,6 +667,8 @@ export default function PipelinePage() {
   const [pool, setPool] = useState({});
   const [modal, setModal] = useState(null);
   const [showPool, setShowPool] = useState(true);
+  const [viewMode, setViewMode] = useState('kanban'); // 'kanban' | 'client'
+  const [calMonth, setCalMonth] = useState(new Date());
   const [isDemo, setIsDemo] = useState(false);
 
   // Auth
@@ -639,6 +791,21 @@ export default function PipelinePage() {
         }}>
           👥 Pool
         </button>
+        {/* View mode toggle */}
+        <div style={{ display: 'flex', background: C.bg, borderRadius: 8, padding: 2, border: `1px solid ${C.brd}` }}>
+          <button onClick={() => setViewMode('kanban')} style={{
+            padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 11, fontWeight: 600,
+            background: viewMode === 'kanban' ? C.card : 'transparent',
+            color: viewMode === 'kanban' ? C.wh : C.txtM,
+            cursor: 'pointer', fontFamily: 'inherit', transition: 'all .12s',
+          }}>◫ Kanban</button>
+          <button onClick={() => setViewMode('client')} style={{
+            padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 11, fontWeight: 600,
+            background: viewMode === 'client' ? C.card : 'transparent',
+            color: viewMode === 'client' ? C.wh : C.txtM,
+            cursor: 'pointer', fontFamily: 'inherit', transition: 'all .12s',
+          }}>👁 Vista cliente</button>
+        </div>
         <select value={selClient} onChange={e => setSelClient(e.target.value)} style={S.sel}>
           {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
@@ -664,9 +831,9 @@ export default function PipelinePage() {
         </div>
       </div>
 
-      {/* Main area: pool panel + kanban */}
+      {/* Main area: pool panel + kanban OR client view */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {showPool && (
+        {viewMode === 'kanban' && showPool && (
           <PoolPanel
             pool={pool} setPool={setPool} team={team}
             clientColor={clientColor} onGenerate={handleGenerate}
@@ -674,22 +841,32 @@ export default function PipelinePage() {
           />
         )}
 
-        {/* Kanban */}
-        <div style={{ flex: 1, display: 'flex', gap: 8, padding: '12px 16px', overflowX: 'auto', alignItems: 'flex-start' }}>
-          {pieces.length === 0 ? (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 60, color: C.txtM }}>
-              <span style={{ fontSize: 48, opacity: .3 }}>🤖</span>
-              <div style={{ fontSize: 16, fontWeight: 700, color: C.txtS }}>Sin piezas este mes</div>
-              <div style={{ fontSize: 13, textAlign: 'center', maxWidth: 320 }}>
-                Configura el pool del equipo en el panel izquierdo y presiona "Generar piezas del mes" para que Pepe las cree y asigne automáticamente.
+        {viewMode === 'kanban' ? (
+          /* Kanban */
+          <div style={{ flex: 1, display: 'flex', gap: 8, padding: '12px 16px', overflowX: 'auto', alignItems: 'flex-start' }}>
+            {pieces.length === 0 ? (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 60, color: C.txtM }}>
+                <span style={{ fontSize: 48, opacity: .3 }}>🤖</span>
+                <div style={{ fontSize: 16, fontWeight: 700, color: C.txtS }}>Sin piezas este mes</div>
+                <div style={{ fontSize: 13, textAlign: 'center', maxWidth: 320 }}>
+                  Configura el pool del equipo en el panel izquierdo y presiona "Generar piezas del mes" para que Pepe las cree y asigne automáticamente.
+                </div>
               </div>
-            </div>
-          ) : (
-            KANBAN_COLS.map(s => (
-              <Column key={s.k} stage={s} pieces={pieces.filter(p => p.status === s.k)} onCardClick={setModal} team={team} />
-            ))
-          )}
-        </div>
+            ) : (
+              KANBAN_COLS.map(s => (
+                <Column key={s.k} stage={s} pieces={pieces.filter(p => p.status === s.k)} onCardClick={setModal} team={team} />
+              ))
+            )}
+          </div>
+        ) : (
+          /* Client View */
+          <ClientView
+            pieces={pieces}
+            onPieceClick={setModal}
+            calMonth={calMonth}
+            setCalMonth={setCalMonth}
+          />
+        )}
       </div>
 
       {modal && <PieceModal piece={modal} onClose={() => setModal(null)} onUpdate={handleUpdate} onDelete={handleDelete} team={team} />}
