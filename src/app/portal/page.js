@@ -854,7 +854,21 @@ export default function Portal() {
   const [session, setSession] = useState(null); // { user, client }
   const [loginError, setLoginError] = useState(null);
   const [loginLoading, setLoginLoading] = useState(false);
-
+// Check if already logged in from main login
+useEffect(() => {
+  try {
+    const stored = JSON.parse(localStorage.getItem('e32o_session'));
+    if (stored?.type === 'client' && stored?.user) {
+      // Build session from centralized auth
+      const clientId = stored.user.client_id;
+      setSession({ 
+        user: stored.user, 
+        client: { id: clientId, name: stored.user.client_name || 'Cliente' } 
+      });
+      setUseDemoData(false);
+    }
+  } catch {}
+}, []);
   // App state
   const [activeTab, setActiveTab] = useState("review");
   const [reviewPieces, setReviewPieces] = useState([]);
