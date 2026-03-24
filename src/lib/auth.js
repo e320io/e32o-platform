@@ -11,30 +11,47 @@ export async function loginClient(username, password) {
   if (error || !data) return null;
 
   // Cargar clientes accesibles vía client_user_access
-  const { data: accessList } = await supabase
-    .from('client_user_access')
-    .select('client_id, display_label, role, is_default, clients(id, name, color, has_ads, monthly_fee, flow)')
-    .eq('client_user_id', data.id);
+  let accessList = [];
+  try {
+    const { data: al, error: alErr } = await supabase
+      .from('client_user_access')
+      .select('client_id, display_label, role, is_default')
+      .eq('client_user_id', data.id);
+    
+    if (!alErr && al && al.length > 0) {
+      // Cargar datos de cada cliente por separado (evita problemas de FK/join)
+      const clientIds = al.map(a => a.client_id);
+      const { data: clientsData } = await supabase
+        .from('clients')
+        .select('id, name, color, has_ads')
+        .in('id', clientIds);
+      
+      const clientMap = {};
+      (clientsData || []).forEach(c => { clientMap[c.id] = c; });
+
+      accessList = al.map(a => ({
+        client_id: a.client_id,
+        display_label: a.display_label || clientMap[a.client_id]?.name || 'Cliente',
+        role: a.role,
+        is_default: a.is_default,
+        has_ads: clientMap[a.client_id]?.has_ads || false,
+        color: clientMap[a.client_id]?.color || null,
+        name: clientMap[a.client_id]?.name || a.display_label,
+      }));
+    }
+  } catch (e) {
+    console.error('Error loading client access:', e);
+  }
 
   // Si tiene accesos en la tabla nueva, usarlos
-  if (accessList && accessList.length > 0) {
+  if (accessList.length > 0) {
     const defaultAccess = accessList.find(a => a.is_default) || accessList[0];
     return {
       user: data,
       type: 'client',
-      // Cliente activo (el default)
       client_id: defaultAccess.client_id,
-      client_name: defaultAccess.display_label || defaultAccess.clients?.name,
-      // Todos los clientes accesibles
-      accessible_clients: accessList.map(a => ({
-        client_id: a.client_id,
-        display_label: a.display_label || a.clients?.name,
-        role: a.role,
-        is_default: a.is_default,
-        has_ads: a.clients?.has_ads || false,
-        color: a.clients?.color,
-        name: a.clients?.name,
-      })),
+      client_name: defaultAccess.display_label,
+      accessible_clients: accessList,
     };
   }
 
@@ -43,15 +60,15 @@ export async function loginClient(username, password) {
     user: data,
     type: 'client',
     client_id: data.client_id,
-    client_name: data.client_name,
+    client_name: data.client_name || data.display_name,
     accessible_clients: [{
       client_id: data.client_id,
-      display_label: data.client_name,
+      display_label: data.client_name || data.display_name,
       role: 'viewer',
       is_default: true,
       has_ads: false,
       color: null,
-      name: data.client_name,
+      name: data.client_name || data.display_name,
     }],
   };
 }
