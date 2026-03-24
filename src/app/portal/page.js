@@ -664,11 +664,11 @@ export default function Portal() {
       // Demo fallback
       const demo = {
         brillo_valle: { id: "2ef8b0f0-7995-41bc-a18c-f1fb4bcea91f", name: "Brillo Mío Valle", has_ads: true, color: "#3EF0C8" },
-        sandra: { id: "multi-sandra", name: "Sandra Arcos", has_ads: true, color: "#C83EF0", multi: true },
+        sandy: { id: "8b8685bc-834e-4950-a161-55b47154318d", name: "Sandy Arcos", has_ads: true, color: "#C83EF0", multi: true },
       };
       if (demo[username] && password === "e3202026") {
         let clients;
-        if (username === "sandra") {
+        if (username === "sandy") {
           // Demo multi-client: Sandra accesses 3 clients
           clients = [
             { client_id: "2ef8b0f0-7995-41bc-a18c-f1fb4bcea91f", display_label: "Brillo Mío Valle", role: "approver", is_default: true, has_ads: true, color: "#3EF0C8" },
@@ -858,7 +858,7 @@ export default function Portal() {
         </div>
       )}
 
-      {useDemoData && <div style={{ position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)", background: T.card, border: `1px solid ${T.brdL}`, borderRadius: 20, padding: "8px 16px", fontSize: 12, color: T.txtM, zIndex: 200 }}>Modo demo — login con "sandra" / "e3202026" para ver multi-cliente</div>}
+      {useDemoData && <div style={{ position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)", background: T.card, border: `1px solid ${T.brdL}`, borderRadius: 20, padding: "8px 16px", fontSize: 12, color: T.txtM, zIndex: 200 }}>Modo demo</div>}
     </div>
   );
 }
