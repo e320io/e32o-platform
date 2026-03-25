@@ -2,8 +2,8 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 
 // ============================================================
-// e.32o — Portal del Cliente (/portal) v3
-// Multi-client switcher + Anuncios tab + original features
+// e.32o — Portal del Cliente (/portal) v4
+// Multi-client switcher + Anuncios tab + Embed previews
 // ============================================================
 
 const SUPABASE_URL = "https://fyiukqelspqdvdulczrs.supabase.co";
@@ -42,6 +42,122 @@ const T = {
   f: "'DM Sans', system-ui, sans-serif",
 };
 
+// ── Embed helper (shared with pipeline) ──
+function getEmbedInfo(url) {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace('www.', '');
+    const path = u.pathname;
+
+    if (host === 'instagram.com' || host === 'instagr.am') {
+      const postMatch = path.match(/\/p\/([A-Za-z0-9_-]+)/);
+      if (postMatch) return { type: 'instagram', id: postMatch[1], platform: 'Instagram', icon: '📸' };
+      const reelMatch = path.match(/\/reel\/([A-Za-z0-9_-]+)/);
+      if (reelMatch) return { type: 'instagram-reel', id: reelMatch[1], platform: 'Instagram Reel', icon: '🎬' };
+      const segments = path.split('/').filter(Boolean);
+      if (segments.length >= 2) return { type: 'instagram', id: segments[segments.length - 1], platform: 'Instagram', icon: '📸' };
+    }
+
+    if (host === 'tiktok.com' || host.endsWith('.tiktok.com')) {
+      const vidMatch = path.match(/\/video\/(\d+)/);
+      if (vidMatch) return { type: 'tiktok', id: vidMatch[1], platform: 'TikTok', icon: '🎵' };
+      return { type: 'link', platform: 'TikTok', icon: '🎵' };
+    }
+
+    if (host === 'youtube.com' || host === 'youtu.be' || host === 'm.youtube.com') {
+      const shortsMatch = path.match(/\/shorts\/([A-Za-z0-9_-]+)/);
+      if (shortsMatch) return { type: 'youtube-short', id: shortsMatch[1], platform: 'YouTube Short', icon: '▶️' };
+      if (host === 'youtu.be') {
+        const id = path.slice(1);
+        if (id) return { type: 'youtube', id, platform: 'YouTube', icon: '▶️' };
+      }
+      const vParam = u.searchParams.get('v');
+      if (vParam) return { type: 'youtube', id: vParam, platform: 'YouTube', icon: '▶️' };
+    }
+
+    if (host === 'facebook.com' || host === 'fb.com' || host === 'fb.watch') {
+      return { type: 'facebook', platform: 'Facebook', icon: '👤' };
+    }
+
+    // Google Drive
+    if (host === 'drive.google.com') {
+      const fileMatch = path.match(/\/file\/d\/([A-Za-z0-9_-]+)/);
+      if (fileMatch) return { type: 'gdrive', id: fileMatch[1], platform: 'Google Drive', icon: '📁' };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ── Embed component ──
+function EmbedPreview({ url, maxWidth = 480 }) {
+  const embedInfo = getEmbedInfo(url);
+  if (!url || !embedInfo || embedInfo.type === 'link') return null;
+
+  return (
+    <div style={{
+      width: embedInfo.type === 'youtube' ? '100%' : maxWidth,
+      maxWidth: '100%', margin: '0 auto',
+      background: '#000', borderRadius: 12, overflow: 'hidden',
+      border: `1px solid ${T.brd}`,
+    }}>
+      {(embedInfo.type === 'instagram' || embedInfo.type === 'instagram-reel') && (
+        <iframe
+          key={embedInfo.id}
+          src={`https://www.instagram.com/${embedInfo.type === 'instagram-reel' ? 'reel' : 'p'}/${embedInfo.id}/embed/captioned/`}
+          style={{
+            width: '100%',
+            minHeight: embedInfo.type === 'instagram-reel' ? 620 : 500,
+            border: 'none', background: '#000',
+          }}
+          allowTransparency="true"
+          scrolling="no"
+          loading="lazy"
+        />
+      )}
+      {embedInfo.type === 'tiktok' && (
+        <iframe
+          src={`https://www.tiktok.com/embed/v2/${embedInfo.id}`}
+          style={{ width: '100%', height: 620, border: 'none', background: '#000' }}
+          allowFullScreen scrolling="no" loading="lazy"
+        />
+      )}
+      {embedInfo.type === 'youtube' && (
+        <iframe
+          src={`https://www.youtube.com/embed/${embedInfo.id}`}
+          style={{ width: '100%', aspectRatio: '16/9', border: 'none', background: '#000' }}
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen loading="lazy"
+        />
+      )}
+      {embedInfo.type === 'youtube-short' && (
+        <iframe
+          src={`https://www.youtube.com/embed/${embedInfo.id}`}
+          style={{ width: '100%', height: 620, border: 'none', background: '#000' }}
+          allowFullScreen loading="lazy"
+        />
+      )}
+      {embedInfo.type === 'facebook' && (
+        <iframe
+          src={`https://www.facebook.com/plugins/post.php?href=${encodeURIComponent(url)}&show_text=false&width=400`}
+          style={{ width: '100%', height: 500, border: 'none', background: '#000' }}
+          scrolling="no" allowFullScreen loading="lazy"
+        />
+      )}
+      {embedInfo.type === 'gdrive' && (
+        <iframe
+          src={`https://drive.google.com/file/d/${embedInfo.id}/preview`}
+          style={{ width: '100%', aspectRatio: '16/9', border: 'none', background: '#000' }}
+          allow="autoplay" loading="lazy"
+        />
+      )}
+    </div>
+  );
+}
+
 // ── Demo data ──
 const DEMO_PIECES = [
   { id: "d1", title: "Reel — Transformación balayage", type: "reel", status: "publicado", scheduled_date: "2026-03-03", piece_category: "organic", edicion_output: "reel_balayage_final.mp4", publish_url: "https://instagram.com/reel/abc123" },
@@ -55,7 +171,6 @@ const DEMO_PIECES = [
   { id: "d9", title: "Carrusel — Abril trends", type: "carrusel", status: "edicion", scheduled_date: "2026-03-24", piece_category: "organic" },
   { id: "d10", title: "Reel — Decoloración segura", type: "reel", status: "edicion", scheduled_date: "2026-03-26", piece_category: "organic" },
   { id: "d11", title: "Fast reel — Quick styling", type: "fast_reel", status: "grabacion", scheduled_date: "2026-03-28", piece_category: "organic" },
-  // ── Ad creatives ──
   { id: "ad1", title: "Ad Reel — Promo 2x1 mechas", type: "reel", status: "publicado", scheduled_date: "2026-03-06", piece_category: "ad_creative", edicion_output: "ad_promo_mechas.mp4", campaign_name: "Promo Marzo — 2x1 Mechas" },
   { id: "ad2", title: "Ad Carrusel — Antes/después", type: "carrusel", status: "publicado", scheduled_date: "2026-03-10", piece_category: "ad_creative", edicion_output: "ad_carousel_ad.pdf", campaign_name: "Promo Marzo — 2x1 Mechas" },
   { id: "ad3", title: "Ad Reel — Experiencia salón", type: "reel", status: "revision_cliente", scheduled_date: "2026-03-20", piece_category: "ad_creative", edicion_output: "ad_experiencia.mp4", campaign_name: "Branding — Experiencia Salón", guion_output: "• Abre con el espacio del salón\n• Mostrar proceso de atención\n• Testimonial corto\n• CTA: Reserva tu cita" },
@@ -87,13 +202,11 @@ function isVideo(f) { if (!f) return false; return /\.(mp4|mov|webm|avi|mkv)$/i.
 function isImage(f) { if (!f) return false; return /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(f); }
 
 // ============================================================
-// CLIENT SWITCHER — for multi-client users (e.g. Sandra Arcos)
+// CLIENT SWITCHER
 // ============================================================
 function ClientSwitcher({ accessibleClients, activeClientId, onSwitch }) {
   const [open, setOpen] = useState(false);
-
   if (!accessibleClients || accessibleClients.length <= 1) return null;
-
   const current = accessibleClients.find(c => c.client_id === activeClientId) || accessibleClients[0];
 
   return (
@@ -106,12 +219,7 @@ function ClientSwitcher({ accessibleClients, activeClientId, onSwitch }) {
         onMouseEnter={e => e.currentTarget.style.borderColor = T.brdL}
         onMouseLeave={e => e.currentTarget.style.borderColor = T.brd}
       >
-        <div style={{
-          width: 28, height: 28, borderRadius: "50%",
-          background: `${current.color || T.acc}22`, color: current.color || T.acc,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 12, fontWeight: 700,
-        }}>{(current.display_label || "?")[0]}</div>
+        <div style={{ width: 28, height: 28, borderRadius: "50%", background: `${current.color || T.acc}22`, color: current.color || T.acc, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700 }}>{(current.display_label || "?")[0]}</div>
         <div style={{ textAlign: "left" }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: T.txt, lineHeight: 1.2 }}>{current.display_label}</div>
           <div style={{ fontSize: 10, color: T.txtD }}>{accessibleClients.length} cuentas</div>
@@ -120,43 +228,23 @@ function ClientSwitcher({ accessibleClients, activeClientId, onSwitch }) {
           <path d="M4 6l4 4 4-4" stroke={T.txtM} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
-
       {open && (
         <>
           <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 49 }} />
-          <div style={{
-            position: "absolute", top: "100%", left: 0, marginTop: 6, width: 240,
-            background: T.card, border: `1px solid ${T.brdL}`, borderRadius: 12,
-            boxShadow: "0 8px 24px rgba(0,0,0,.5)", zIndex: 50, overflow: "hidden",
-          }}>
-            <div style={{ padding: "8px 12px", borderBottom: `1px solid ${T.brd}` }}>
-              <span style={{ fontSize: 11, color: T.txtD }}>Cambiar cuenta</span>
-            </div>
+          <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 6, width: 240, background: T.card, border: `1px solid ${T.brdL}`, borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,.5)", zIndex: 50, overflow: "hidden" }}>
+            <div style={{ padding: "8px 12px", borderBottom: `1px solid ${T.brd}` }}><span style={{ fontSize: 11, color: T.txtD }}>Cambiar cuenta</span></div>
             {accessibleClients.map(ac => (
               <button key={ac.client_id} onClick={() => { onSwitch(ac.client_id); setOpen(false); }} style={{
-                width: "100%", display: "flex", alignItems: "center", gap: 10,
-                padding: "10px 12px", border: "none", cursor: "pointer", fontFamily: T.f,
-                background: ac.client_id === activeClientId ? `${T.acc}10` : "transparent",
-                transition: "background .1s",
+                width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", border: "none", cursor: "pointer", fontFamily: T.f,
+                background: ac.client_id === activeClientId ? `${T.acc}10` : "transparent", transition: "background .1s",
               }}
                 onMouseEnter={e => { if (ac.client_id !== activeClientId) e.currentTarget.style.background = "#1A1A1A"; }}
                 onMouseLeave={e => { if (ac.client_id !== activeClientId) e.currentTarget.style.background = "transparent"; }}
               >
-                <div style={{
-                  width: 26, height: 26, borderRadius: "50%",
-                  background: ac.client_id === activeClientId ? `${(ac.color || T.acc)}22` : "#1A1A1A",
-                  color: ac.client_id === activeClientId ? (ac.color || T.acc) : T.txtM,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 11, fontWeight: 700,
-                }}>{(ac.display_label || "?")[0]}</div>
-                <span style={{
-                  flex: 1, fontSize: 13, fontWeight: 500, textAlign: "left",
-                  color: ac.client_id === activeClientId ? T.acc : T.txt,
-                }}>{ac.display_label}</span>
+                <div style={{ width: 26, height: 26, borderRadius: "50%", background: ac.client_id === activeClientId ? `${(ac.color || T.acc)}22` : "#1A1A1A", color: ac.client_id === activeClientId ? (ac.color || T.acc) : T.txtM, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700 }}>{(ac.display_label || "?")[0]}</div>
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 500, textAlign: "left", color: ac.client_id === activeClientId ? T.acc : T.txt }}>{ac.display_label}</span>
                 {ac.client_id === activeClientId && (
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                    <path d="M3 8l3.5 3.5L13 5" stroke={T.acc} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8l3.5 3.5L13 5" stroke={T.acc} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 )}
               </button>
             ))}
@@ -168,35 +256,24 @@ function ClientSwitcher({ accessibleClients, activeClientId, onSwitch }) {
 }
 
 // ============================================================
-// ANUNCIOS TAB — Ad creatives separate from editorial calendar
+// ANUNCIOS TAB
 // ============================================================
 function AnunciosSection({ pieces, onPieceClick }) {
   const adPieces = pieces.filter(p => p.piece_category === "ad_creative");
   const [filter, setFilter] = useState("all");
 
-  // Group by campaign
   const campaigns = useMemo(() => {
     const map = {};
-    adPieces.forEach(p => {
-      const name = p.campaign_name || p.campaigns?.name || "Sin campaña";
-      if (!map[name]) map[name] = [];
-      map[name].push(p);
-    });
+    adPieces.forEach(p => { const name = p.campaign_name || "Sin campaña"; if (!map[name]) map[name] = []; map[name].push(p); });
     return map;
   }, [adPieces]);
 
   const campaignNames = Object.keys(campaigns);
   const filtered = filter === "all" ? adPieces : (campaigns[filter] || []);
-
-  const stats = {
-    total: adPieces.length,
-    published: adPieces.filter(p => p.status === "publicado").length,
-    inReview: adPieces.filter(p => p.status === "revision_cliente").length,
-  };
+  const stats = { total: adPieces.length, published: adPieces.filter(p => p.status === "publicado").length, inReview: adPieces.filter(p => p.status === "revision_cliente").length };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
         {[
           { label: "Total creativos", value: stats.total, color: T.txt },
@@ -209,33 +286,18 @@ function AnunciosSection({ pieces, onPieceClick }) {
           </div>
         ))}
       </div>
-
-      {/* Campaign filter */}
       {campaignNames.length > 0 && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          <button onClick={() => setFilter("all")} style={{
-            padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, fontFamily: T.f, cursor: "pointer", border: "none",
-            background: filter === "all" ? T.accDim : T.card,
-            color: filter === "all" ? T.acc : T.txtM,
-            outline: filter === "all" ? `1px solid ${T.acc}33` : `1px solid ${T.brd}`,
-          }}>Todas ({adPieces.length})</button>
+          <button onClick={() => setFilter("all")} style={{ padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, fontFamily: T.f, cursor: "pointer", border: "none", background: filter === "all" ? T.accDim : T.card, color: filter === "all" ? T.acc : T.txtM, outline: filter === "all" ? `1px solid ${T.acc}33` : `1px solid ${T.brd}` }}>Todas ({adPieces.length})</button>
           {campaignNames.map(name => (
-            <button key={name} onClick={() => setFilter(name)} style={{
-              padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, fontFamily: T.f, cursor: "pointer", border: "none",
-              background: filter === name ? T.accDim : T.card,
-              color: filter === name ? T.acc : T.txtM,
-              outline: filter === name ? `1px solid ${T.acc}33` : `1px solid ${T.brd}`,
-            }}>{name} ({campaigns[name].length})</button>
+            <button key={name} onClick={() => setFilter(name)} style={{ padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, fontFamily: T.f, cursor: "pointer", border: "none", background: filter === name ? T.accDim : T.card, color: filter === name ? T.acc : T.txtM, outline: filter === name ? `1px solid ${T.acc}33` : `1px solid ${T.brd}` }}>{name} ({campaigns[name].length})</button>
           ))}
         </div>
       )}
-
-      {/* Pieces list */}
       {filtered.length === 0 ? (
         <div style={{ textAlign: "center", padding: "60px 20px" }}>
           <div style={{ fontSize: 36, opacity: .3, marginBottom: 12 }}>📢</div>
           <div style={{ fontSize: 14, color: T.txtM }}>No hay creativos de ads aún</div>
-          <div style={{ fontSize: 12, color: T.txtD, marginTop: 4 }}>Aquí verás los videos e imágenes creados para tus campañas</div>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -244,10 +306,7 @@ function AnunciosSection({ pieces, onPieceClick }) {
             const tc = typeC[p.type] || T.acc;
             const isRev = p.status === "revision_cliente";
             return (
-              <div key={p.id} onClick={() => onPieceClick(p)} style={{
-                background: T.card, border: `1px solid ${isRev ? `${T.yel}33` : T.brd}`, borderRadius: T.r,
-                padding: "14px 18px", cursor: "pointer", transition: "border-color .15s",
-              }}
+              <div key={p.id} onClick={() => onPieceClick(p)} style={{ background: T.card, border: `1px solid ${isRev ? `${T.yel}33` : T.brd}`, borderRadius: T.r, padding: "14px 18px", cursor: "pointer", transition: "border-color .15s" }}
                 onMouseEnter={e => e.currentTarget.style.borderColor = isRev ? `${T.yel}55` : T.brdL}
                 onMouseLeave={e => e.currentTarget.style.borderColor = isRev ? `${T.yel}33` : T.brd}
               >
@@ -257,16 +316,8 @@ function AnunciosSection({ pieces, onPieceClick }) {
                   <span style={{ fontSize: 12, color: T.txtD, marginLeft: "auto" }}>{fmtDate(p.scheduled_date)}</span>
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: T.txt }}>{p.title}</div>
-                {p.campaign_name && (
-                  <div style={{ fontSize: 11, color: T.txtD, marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
-                    <span>📊</span> {p.campaign_name}
-                  </div>
-                )}
-                {isRev && (
-                  <div style={{ marginTop: 8 }}>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: T.yel, background: T.yelDim, padding: "3px 10px", borderRadius: 6 }}>Pendiente de tu revisión</span>
-                  </div>
-                )}
+                {p.campaign_name && <div style={{ fontSize: 11, color: T.txtD, marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}><span>📊</span> {p.campaign_name}</div>}
+                {isRev && <div style={{ marginTop: 8 }}><span style={{ fontSize: 11, fontWeight: 600, color: T.yel, background: T.yelDim, padding: "3px 10px", borderRadius: 6 }}>Pendiente de tu revisión</span></div>}
               </div>
             );
           })}
@@ -277,7 +328,7 @@ function AnunciosSection({ pieces, onPieceClick }) {
 }
 
 // ============================================================
-// DELIVERABLES PROGRESS — counts both organic + ad_creative
+// DELIVERABLES PROGRESS
 // ============================================================
 function DeliverableProgress({ pieces }) {
   const organic = pieces.filter(p => (p.piece_category || "organic") === "organic");
@@ -292,46 +343,25 @@ function DeliverableProgress({ pieces }) {
         <div style={{ fontSize: 14, fontWeight: 700, color: T.txt }}>Entrega del mes</div>
         <div style={{ fontSize: 22, fontWeight: 800, color: T.acc }}>{pct}%</div>
       </div>
-      {/* Bar */}
       <div style={{ height: 8, background: T.bg, borderRadius: 4, overflow: "hidden", display: "flex" }}>
-        {pieces.filter(p => p.status === "publicado").length > 0 && <div style={{ width: `${(published / total) * 100}%`, background: T.acc, transition: "width .4s" }} />}
+        {published > 0 && <div style={{ width: `${(published / total) * 100}%`, background: T.acc, transition: "width .4s" }} />}
         {pieces.filter(p => p.status === "revision_cliente").length > 0 && <div style={{ width: `${(pieces.filter(p => p.status === "revision_cliente").length / total) * 100}%`, background: T.yel, transition: "width .4s" }} />}
         {pieces.filter(p => !["publicado", "revision_cliente", "pendiente"].includes(p.status)).length > 0 && <div style={{ width: `${(pieces.filter(p => !["publicado", "revision_cliente", "pendiente"].includes(p.status)).length / total) * 100}%`, background: T.blue, transition: "width .4s" }} />}
       </div>
-      {/* Desglose orgánico vs ads */}
-      {adCreative.length > 0 && (
+      {adCreative.length > 0 ? (
         <div style={{ display: "flex", gap: 20, marginTop: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <span style={{ width: 8, height: 8, borderRadius: 3, background: T.acc }} />
-            <span style={{ fontSize: 11, color: T.txtM }}>
-              Orgánico: {organic.filter(p => p.status === "publicado").length}/{organic.length}
-            </span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <span style={{ width: 8, height: 8, borderRadius: 3, background: "#EF9F27" }} />
-            <span style={{ fontSize: 11, color: T.txtM }}>
-              Ads: {adCreative.filter(p => p.status === "publicado").length}/{adCreative.length}
-            </span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 5, marginLeft: "auto" }}>
-            <span style={{ fontSize: 11, color: T.txtM, fontWeight: 600 }}>
-              Total: {published}/{total} entregables
-            </span>
-          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 3, background: T.acc }} /><span style={{ fontSize: 11, color: T.txtM }}>Orgánico: {organic.filter(p => p.status === "publicado").length}/{organic.length}</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 3, background: "#EF9F27" }} /><span style={{ fontSize: 11, color: T.txtM }}>Ads: {adCreative.filter(p => p.status === "publicado").length}/{adCreative.length}</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 5, marginLeft: "auto" }}><span style={{ fontSize: 11, color: T.txtM, fontWeight: 600 }}>Total: {published}/{total}</span></div>
         </div>
-      )}
-      {/* Legend if no ads */}
-      {adCreative.length === 0 && (
+      ) : (
         <div style={{ display: "flex", gap: 16, marginTop: 10, flexWrap: "wrap" }}>
           {[
             { label: `${published} publicadas`, color: T.acc },
             { label: `${pieces.filter(p => p.status === "revision_cliente").length} en tu revisión`, color: T.yel },
             { label: `${pieces.filter(p => !["publicado", "revision_cliente", "pendiente"].includes(p.status)).length} en proceso`, color: T.blue },
           ].map(l => (
-            <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: l.color }} />
-              <span style={{ fontSize: 11, color: T.txtM }}>{l.label}</span>
-            </div>
+            <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: l.color }} /><span style={{ fontSize: 11, color: T.txtM }}>{l.label}</span></div>
           ))}
         </div>
       )}
@@ -340,7 +370,7 @@ function DeliverableProgress({ pieces }) {
 }
 
 // ============================================================
-// PIECE DETAIL MODAL (same as before)
+// PIECE DETAIL MODAL — with embed preview
 // ============================================================
 function PieceModal({ piece, onClose, onApprove, onRequestChanges }) {
   const [feedback, setFeedback] = useState("");
@@ -350,12 +380,24 @@ function PieceModal({ piece, onClose, onApprove, onRequestChanges }) {
   const file = piece.edicion_output || piece.grabacion_output;
   const isRev = piece.status === "revision_cliente";
   const isAd = piece.piece_category === "ad_creative";
+  const isPub = piece.status === "publicado";
+
+  // Check if we have an embeddable publish_url
+  const embedInfo = getEmbedInfo(piece.publish_url);
+  const hasEmbed = piece.publish_url && embedInfo && embedInfo.type !== 'link';
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,.75)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div onClick={e => e.stopPropagation()} style={{ background: T.card, borderRadius: 16, border: `1px solid ${T.brdL}`, width: "100%", maxWidth: 600, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,.5)", overflow: "hidden" }}>
-        <div style={{ background: T.bg, borderBottom: `1px solid ${T.brd}`, minHeight: 200, display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
-          {file && isVideo(file) ? (
+
+        {/* Preview area — embed takes priority, then file, then placeholder */}
+        <div style={{ background: T.bg, borderBottom: `1px solid ${T.brd}`, position: "relative", overflow: "hidden" }}>
+          {hasEmbed ? (
+            /* Social media embed */
+            <div style={{ padding: 0 }}>
+              <EmbedPreview url={piece.publish_url} maxWidth={600} />
+            </div>
+          ) : file && isVideo(file) ? (
             <div style={{ width: "100%", padding: "20px", textAlign: "center" }}>
               <div style={{ background: "#000", borderRadius: 8, overflow: "hidden", maxWidth: 480, margin: "0 auto", aspectRatio: "9/16", maxHeight: 320, display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, color: T.txtM }}>
@@ -375,22 +417,33 @@ function PieceModal({ piece, onClose, onApprove, onRequestChanges }) {
               <span style={{ fontSize: 13 }}>Archivo en preparación</span>
             </div>
           )}
+
+          {/* Status badges */}
           <div style={{ position: "absolute", top: 12, right: 12, display: "flex", gap: 6 }}>
             {isAd && <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 20, background: "rgba(239,159,39,0.18)", color: "#EF9F27", textTransform: "uppercase" }}>Ad creative</span>}
             <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 20, background: `${sc}18`, color: sc, textTransform: "uppercase" }}>{statusL[piece.status]}</span>
           </div>
           <button onClick={onClose} style={{ position: "absolute", top: 12, left: 12, background: "rgba(0,0,0,.5)", border: "none", color: "#fff", width: 32, height: 32, borderRadius: "50%", fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
         </div>
+
+        {/* Content */}
         <div style={{ padding: "18px 22px", flex: 1, overflowY: "auto" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
             <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: `${tc}15`, color: tc, textTransform: "uppercase" }}>{typeL[piece.type] || piece.type}</span>
             <span style={{ fontSize: 12, color: T.txtM }}>{fmtDate(piece.scheduled_date)}</span>
+            {piece.publish_url && (
+              <a href={piece.publish_url} target="_blank" rel="noopener noreferrer" style={{
+                marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4,
+                fontSize: 11, color: T.acc, textDecoration: "none",
+                padding: "3px 10px", background: T.accDim, borderRadius: 6, fontWeight: 600,
+              }}>
+                ↗ {embedInfo?.platform || 'Ver publicación'}
+              </a>
+            )}
           </div>
           <h2 style={{ fontSize: 18, fontWeight: 700, color: T.txt, margin: "0 0 12px", lineHeight: 1.3 }}>{piece.title}</h2>
           {piece.campaign_name && (
-            <div style={{ fontSize: 12, color: T.txtD, marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
-              <span>📊</span> Campaña: {piece.campaign_name}
-            </div>
+            <div style={{ fontSize: 12, color: T.txtD, marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}><span>📊</span> Campaña: {piece.campaign_name}</div>
           )}
           {piece.guion_output && (
             <div style={{ background: T.bg, border: `1px solid ${T.brd}`, borderRadius: T.rS, padding: "14px 16px", marginBottom: 12 }}>
@@ -399,9 +452,7 @@ function PieceModal({ piece, onClose, onApprove, onRequestChanges }) {
             </div>
           )}
           {piece.research_output && (
-            <a href={piece.research_output} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: T.acc, textDecoration: "none", padding: "6px 12px", background: T.accDim, borderRadius: T.rX, marginBottom: 12 }}>
-              ↗ Ver referencia
-            </a>
+            <a href={piece.research_output} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: T.acc, textDecoration: "none", padding: "6px 12px", background: T.accDim, borderRadius: T.rX, marginBottom: 12 }}>↗ Ver referencia</a>
           )}
           {isRev && (
             <div style={{ marginTop: 16, borderTop: `1px solid ${T.brd}`, paddingTop: 16 }}>
@@ -428,10 +479,9 @@ function PieceModal({ piece, onClose, onApprove, onRequestChanges }) {
 }
 
 // ============================================================
-// CALENDAR (same as before, filters only organic pieces)
+// CALENDAR
 // ============================================================
 function CalendarSection({ pieces, calMonth, setCalMonth, onPieceClick }) {
-  // Only show organic pieces in calendar
   const organicPieces = pieces.filter(p => (p.piece_category || "organic") === "organic");
   const year = calMonth.getFullYear(), month = calMonth.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
@@ -444,11 +494,7 @@ function CalendarSection({ pieces, calMonth, setCalMonth, onPieceClick }) {
     organicPieces.forEach(p => {
       if (!p.scheduled_date) return;
       const d = new Date(p.scheduled_date + "T12:00:00");
-      if (d.getMonth() === month && d.getFullYear() === year) {
-        const day = d.getDate();
-        if (!map[day]) map[day] = [];
-        map[day].push(p);
-      }
+      if (d.getMonth() === month && d.getFullYear() === year) { const day = d.getDate(); if (!map[day]) map[day] = []; map[day].push(p); }
     });
     return map;
   }, [organicPieces, month, year]);
@@ -481,17 +527,10 @@ function CalendarSection({ pieces, calMonth, setCalMonth, onPieceClick }) {
                     {dp.map(p => {
                       const pc = statusC[p.status] || T.txtD;
                       return (
-                        <div key={p.id} onClick={() => onPieceClick(p)} style={{
-                          margin: "2px 1px", padding: "3px 5px", borderRadius: 4,
-                          fontSize: 10, fontWeight: 600, color: pc, background: `${pc}15`,
-                          cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                          transition: "background .1s",
-                        }}
+                        <div key={p.id} onClick={() => onPieceClick(p)} style={{ margin: "2px 1px", padding: "3px 5px", borderRadius: 4, fontSize: 10, fontWeight: 600, color: pc, background: `${pc}15`, cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", transition: "background .1s" }}
                           onMouseEnter={e => e.currentTarget.style.background = `${pc}28`}
                           onMouseLeave={e => e.currentTarget.style.background = `${pc}15`}
-                        >
-                          {typeL[p.type] || p.type}
-                        </div>
+                        >{typeL[p.type] || p.type}</div>
                       );
                     })}
                   </>
@@ -506,7 +545,7 @@ function CalendarSection({ pieces, calMonth, setCalMonth, onPieceClick }) {
 }
 
 // ============================================================
-// ADS METRICS SECTION (same as before)
+// ADS METRICS
 // ============================================================
 function AdsSection({ metrics }) {
   const m = metrics || DEMO_AD_METRICS;
@@ -592,76 +631,41 @@ export default function Portal() {
   const [modalPiece, setModalPiece] = useState(null);
   const [toast, setToast] = useState(null);
   const [useDemoData, setUseDemoData] = useState(false);
-  // Multi-client state
   const [activeClientId, setActiveClientId] = useState(null);
   const [accessibleClients, setAccessibleClients] = useState([]);
 
   const showToast = useCallback((msg, type = "success") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); }, []);
 
-  // ── Check centralized session on mount ──
   useEffect(() => {
     try {
       const stored = JSON.parse(localStorage.getItem("e32o_session"));
       if (stored?.type === "client" && stored?.user) {
         const cid = stored.client_id || stored.user.client_id;
-        const clients = stored.accessible_clients || [{
-          client_id: cid,
-          display_label: stored.client_name || stored.user.client_name || "Cliente",
-          role: "viewer", is_default: true, has_ads: false,
-        }];
-        setSession(stored);
-        setAccessibleClients(clients);
-        setActiveClientId(cid);
-        return;
+        const clients = stored.accessible_clients || [{ client_id: cid, display_label: stored.client_name || "Cliente", role: "viewer", is_default: true, has_ads: false }];
+        setSession(stored); setAccessibleClients(clients); setActiveClientId(cid);
       }
     } catch {}
   }, []);
 
-  // ── Fallback login ──
   const handleLogin = useCallback(async (username, password) => {
     setLoginLoading(true); setLoginError(null);
     try {
       const users = await sbRest("client_users", { filters: [["username", "eq", username]], limit: 1 });
       if (users.length > 0 && users[0].password_hash === password) {
-        // Check multi-client access
-        const accessList = await sbRest("client_user_access", {
-          select: "client_id,display_label,role,is_default,clients(id,name,color,has_ads)",
-          filters: [["client_user_id", "eq", users[0].id]],
-        });
-
+        const accessList = await sbRest("client_user_access", { select: "client_id,display_label,role,is_default,clients(id,name,color,has_ads)", filters: [["client_user_id", "eq", users[0].id]] });
         let clients, defaultClientId, clientName;
-
         if (accessList.length > 0) {
-          clients = accessList.map(a => ({
-            client_id: a.client_id,
-            display_label: a.display_label || a.clients?.name,
-            role: a.role, is_default: a.is_default,
-            has_ads: a.clients?.has_ads || false,
-            color: a.clients?.color, name: a.clients?.name,
-          }));
-          const def = clients.find(c => c.is_default) || clients[0];
-          defaultClientId = def.client_id;
-          clientName = def.display_label;
+          clients = accessList.map(a => ({ client_id: a.client_id, display_label: a.display_label || a.clients?.name, role: a.role, is_default: a.is_default, has_ads: a.clients?.has_ads || false, color: a.clients?.color, name: a.clients?.name }));
+          const def = clients.find(c => c.is_default) || clients[0]; defaultClientId = def.client_id; clientName = def.display_label;
         } else {
-          // Fallback: single client from client_users.client_id
           const cl = await sbRest("clients", { filters: [["id", "eq", users[0].client_id]], limit: 1 });
-          defaultClientId = users[0].client_id;
-          clientName = cl[0]?.name || users[0].client_name || "Cliente";
+          defaultClientId = users[0].client_id; clientName = cl[0]?.name || users[0].client_name || "Cliente";
           clients = [{ client_id: defaultClientId, display_label: clientName, role: "viewer", is_default: true, has_ads: cl[0]?.has_ads || false, color: cl[0]?.color }];
         }
-
-        const sessionData = {
-          user: users[0], type: "client",
-          client_id: defaultClientId, client_name: clientName,
-          accessible_clients: clients,
-        };
+        const sessionData = { user: users[0], type: "client", client_id: defaultClientId, client_name: clientName, accessible_clients: clients };
         localStorage.setItem("e32o_session", JSON.stringify(sessionData));
-        setSession(sessionData);
-        setAccessibleClients(clients);
-        setActiveClientId(defaultClientId);
-        return;
+        setSession(sessionData); setAccessibleClients(clients); setActiveClientId(defaultClientId); return;
       }
-      // Demo fallback
       const demo = {
         brillo_valle: { id: "2ef8b0f0-7995-41bc-a18c-f1fb4bcea91f", name: "Brillo Mío Valle", has_ads: true, color: "#3EF0C8" },
         sandy: { id: "8b8685bc-834e-4950-a161-55b47154318d", name: "Sandy Arcos", has_ads: true, color: "#C83EF0", multi: true },
@@ -669,7 +673,6 @@ export default function Portal() {
       if (demo[username] && password === "e3202026") {
         let clients;
         if (username === "sandy") {
-          // Demo multi-client: Sandra accesses 3 clients
           clients = [
             { client_id: "2ef8b0f0-7995-41bc-a18c-f1fb4bcea91f", display_label: "Brillo Mío Valle", role: "approver", is_default: true, has_ads: true, color: "#3EF0C8" },
             { client_id: "9b1a57b7-bc7e-4920-aade-c00985e6a544", display_label: "Brillo Mío Santa Fe", role: "approver", is_default: false, has_ads: true, color: "#3EB8F0" },
@@ -680,30 +683,21 @@ export default function Portal() {
         }
         const sessionData = { user: { username }, type: "client", client_id: clients[0].client_id, client_name: clients[0].display_label, accessible_clients: clients };
         localStorage.setItem("e32o_session", JSON.stringify(sessionData));
-        setSession(sessionData);
-        setAccessibleClients(clients);
-        setActiveClientId(clients[0].client_id);
-        setUseDemoData(true);
-        return;
+        setSession(sessionData); setAccessibleClients(clients); setActiveClientId(clients[0].client_id); setUseDemoData(true); return;
       }
       setLoginError("Usuario o contraseña incorrectos");
     } catch { setLoginError("Error de conexión"); }
     finally { setLoginLoading(false); }
   }, []);
 
-  // ── Switch client ──
   const handleSwitchClient = useCallback((newClientId) => {
-    setActiveClientId(newClientId);
-    setActiveTab("calendar"); // Reset to calendar on switch
-    // Update session in localStorage
+    setActiveClientId(newClientId); setActiveTab("calendar");
     const stored = JSON.parse(localStorage.getItem("e32o_session") || "{}");
     const cl = accessibleClients.find(c => c.client_id === newClientId);
-    stored.client_id = newClientId;
-    stored.client_name = cl?.display_label;
+    stored.client_id = newClientId; stored.client_name = cl?.display_label;
     localStorage.setItem("e32o_session", JSON.stringify(stored));
   }, [accessibleClients]);
 
-  // ── Load data ──
   useEffect(() => {
     if (!session || !activeClientId) return;
     (async () => {
@@ -721,33 +715,24 @@ export default function Portal() {
   const handleApprove = useCallback(async (id) => {
     if (!useDemoData) { try { await sbPatch("content_pieces", id, { status: "grabacion" }); } catch {} }
     setPieces(prev => prev.map(p => p.id === id ? { ...p, status: "grabacion" } : p));
-    setModalPiece(null);
-    showToast("Pieza aprobada. El equipo avanza.");
+    setModalPiece(null); showToast("Pieza aprobada. El equipo avanza.");
   }, [useDemoData, showToast]);
 
   const handleRequestChanges = useCallback(async (id, feedback) => {
     if (!useDemoData) { try { await sbPatch("content_pieces", id, { status: "guion", client_feedback: feedback }); } catch {} }
     setPieces(prev => prev.map(p => p.id === id ? { ...p, status: "guion" } : p));
-    setModalPiece(null);
-    showToast("Comentario enviado. El equipo ajustará la propuesta.", "info");
+    setModalPiece(null); showToast("Comentario enviado. El equipo ajustará la propuesta.", "info");
   }, [useDemoData, showToast]);
 
   const reviewPieces = useMemo(() => pieces.filter(p => p.status === "revision_cliente"), [pieces]);
   const activeClient = accessibleClients.find(c => c.client_id === activeClientId);
   const hasAds = activeClient?.has_ads || false;
 
-  // Dynamic tabs based on client capabilities
   const TABS = useMemo(() => {
-    const tabs = [
-      { id: "calendar", label: "Calendario", icon: "📅" },
-    ];
-    if (hasAds) {
-      tabs.push({ id: "anuncios", label: "Anuncios", icon: "📢" });
-    }
+    const tabs = [{ id: "calendar", label: "Calendario", icon: "📅" }];
+    if (hasAds) tabs.push({ id: "anuncios", label: "Anuncios", icon: "📢" });
     tabs.push({ id: "review", label: "Revisión", icon: "📋" });
-    if (hasAds) {
-      tabs.push({ id: "ads", label: "Ads", icon: "📊" });
-    }
+    if (hasAds) tabs.push({ id: "ads", label: "Ads", icon: "📊" });
     return tabs;
   }, [hasAds]);
 
@@ -758,30 +743,18 @@ export default function Portal() {
   return (
     <div style={{ minHeight: "100vh", background: T.bg, fontFamily: T.f, color: T.txt }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-
-      {/* Header */}
       <header style={{ position: "sticky", top: 0, zIndex: 100, background: "rgba(10,10,10,.9)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${T.brd}` }}>
         <div style={{ maxWidth: 900, margin: "0 auto", padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-.8px" }}>e<span style={{ color: T.acc }}>.</span>32o</span>
             <span style={{ width: 1, height: 20, background: T.brdL }} />
-            {/* Client switcher OR simple name */}
-            {accessibleClients.length > 1 ? (
-              <ClientSwitcher
-                accessibleClients={accessibleClients}
-                activeClientId={activeClientId}
-                onSwitch={handleSwitchClient}
-              />
-            ) : (
-              <span style={{ fontSize: 14, fontWeight: 600, color: T.txtM }}>{activeClient?.display_label || "Cliente"}</span>
-            )}
+            {accessibleClients.length > 1 ? <ClientSwitcher accessibleClients={accessibleClients} activeClientId={activeClientId} onSwitch={handleSwitchClient} /> : <span style={{ fontSize: 14, fontWeight: 600, color: T.txtM }}>{activeClient?.display_label || "Cliente"}</span>}
           </div>
           <button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${T.brd}`, borderRadius: T.rX, padding: "6px 12px", color: T.txtM, fontSize: 12, fontWeight: 600, fontFamily: T.f, cursor: "pointer" }}>Salir</button>
         </div>
       </header>
 
       <main style={{ maxWidth: 900, margin: "0 auto", padding: "16px 20px 80px" }}>
-        {/* Tabs */}
         <div style={{ display: "flex", gap: 4, background: T.card, borderRadius: T.rS, padding: 4, border: `1px solid ${T.brd}`, marginBottom: 16 }}>
           {TABS.map(tab => {
             const active = activeTab === tab.id;
@@ -802,21 +775,12 @@ export default function Portal() {
 
         {loading ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 80, color: T.txtM }}>
-            <div style={{ width: 24, height: 24, border: `2px solid ${T.brd}`, borderTopColor: T.acc, borderRadius: "50%", animation: "spin .8s linear infinite", marginRight: 10 }} />
-            Cargando...
-            <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+            <div style={{ width: 24, height: 24, border: `2px solid ${T.brd}`, borderTopColor: T.acc, borderRadius: "50%", animation: "spin .8s linear infinite", marginRight: 10 }} />Cargando...<style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
           </div>
         ) : (
           <>
-            {activeTab === "calendar" && (
-              <>
-                <DeliverableProgress pieces={pieces} />
-                <CalendarSection pieces={pieces} calMonth={calMonth} setCalMonth={setCalMonth} onPieceClick={setModalPiece} />
-              </>
-            )}
-            {activeTab === "anuncios" && (
-              <AnunciosSection pieces={pieces} onPieceClick={setModalPiece} />
-            )}
+            {activeTab === "calendar" && (<><DeliverableProgress pieces={pieces} /><CalendarSection pieces={pieces} calMonth={calMonth} setCalMonth={setCalMonth} onPieceClick={setModalPiece} /></>)}
+            {activeTab === "anuncios" && <AnunciosSection pieces={pieces} onPieceClick={setModalPiece} />}
             {activeTab === "review" && (
               reviewPieces.length === 0 ? (
                 <div style={{ textAlign: "center", padding: "80px 20px" }}>
@@ -828,10 +792,8 @@ export default function Portal() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   <div style={{ fontSize: 13, color: T.txtM }}>{reviewPieces.length} pieza{reviewPieces.length > 1 ? "s" : ""} pendiente{reviewPieces.length > 1 ? "s" : ""}</div>
                   {reviewPieces.map(p => (
-                    <div key={p.id} onClick={() => setModalPiece(p)} style={{
-                      background: T.card, border: `1px solid ${T.brd}`, borderRadius: T.r,
-                      padding: "16px 18px", cursor: "pointer", transition: "border-color .15s",
-                    }} onMouseEnter={e => e.currentTarget.style.borderColor = T.yel + "44"} onMouseLeave={e => e.currentTarget.style.borderColor = T.brd}>
+                    <div key={p.id} onClick={() => setModalPiece(p)} style={{ background: T.card, border: `1px solid ${T.brd}`, borderRadius: T.r, padding: "16px 18px", cursor: "pointer", transition: "border-color .15s" }}
+                      onMouseEnter={e => e.currentTarget.style.borderColor = T.yel + "44"} onMouseLeave={e => e.currentTarget.style.borderColor = T.brd}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                         <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: `${typeC[p.type] || T.acc}15`, color: typeC[p.type] || T.acc, textTransform: "uppercase" }}>{typeL[p.type] || p.type}</span>
                         {p.piece_category === "ad_creative" && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: "rgba(239,159,39,0.15)", color: "#EF9F27", textTransform: "uppercase" }}>Ad</span>}
@@ -853,11 +815,9 @@ export default function Portal() {
 
       {toast && (
         <div style={{ position: "fixed", top: 20, right: 20, background: toast.type === "success" ? T.accDim : T.yelDim, border: `1px solid ${toast.type === "success" ? T.acc : T.yel}40`, borderRadius: T.rS, padding: "12px 18px", maxWidth: 360, fontSize: 13, fontWeight: 600, zIndex: 1100, color: toast.type === "success" ? T.acc : T.yel, animation: "slideIn .3s ease-out" }}>
-          {toast.msg}
-          <style>{`@keyframes slideIn{from{transform:translateX(20px);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
+          {toast.msg}<style>{`@keyframes slideIn{from{transform:translateX(20px);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
         </div>
       )}
-
       {useDemoData && <div style={{ position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)", background: T.card, border: `1px solid ${T.brdL}`, borderRadius: 20, padding: "8px 16px", fontSize: 12, color: T.txtM, zIndex: 200 }}>Modo demo</div>}
     </div>
   );
