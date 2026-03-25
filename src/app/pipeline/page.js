@@ -615,31 +615,28 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team, onMoveToStatus }
               return (
                 <div style={{ padding: '10px 0' }}>
                   {local.status === 'publicado' ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-                      {/* Embed preview — show first if there's a URL */}
-                      {url && embedInfo && (
-                        <div>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span>{embedInfo.icon}</span> Vista previa — {embedInfo.platform}
-                          </div>
+                      {/* Embed preview — centered with correct sizing */}
+                      {url && embedInfo && embedInfo.type !== 'link' && (
+                        <div style={{
+                          display: 'flex', justifyContent: 'center',
+                        }}>
                           <div style={{
+                            width: embedInfo.type === 'youtube' ? '100%' : 400,
+                            maxWidth: '100%',
                             background: '#000', borderRadius: 12, overflow: 'hidden',
-                            border: `1px solid ${C.brd}`, position: 'relative',
+                            border: `1px solid ${C.brd}`,
                           }}>
-                            {embedInfo.type === 'instagram' && (
+                            {(embedInfo.type === 'instagram' || embedInfo.type === 'instagram-reel') && (
                               <iframe
-                                src={`https://www.instagram.com/p/${embedInfo.id}/embed/`}
-                                style={{ width: '100%', height: 480, border: 'none', background: '#000' }}
-                                allowTransparency="true"
-                                scrolling="no"
-                                loading="lazy"
-                              />
-                            )}
-                            {embedInfo.type === 'instagram-reel' && (
-                              <iframe
-                                src={`https://www.instagram.com/reel/${embedInfo.id}/embed/`}
-                                style={{ width: '100%', height: 580, border: 'none', background: '#000' }}
+                                key={embedInfo.id}
+                                src={`https://www.instagram.com/${embedInfo.type === 'instagram-reel' ? 'reel' : 'p'}/${embedInfo.id}/embed/captioned/`}
+                                style={{
+                                  width: '100%',
+                                  minHeight: embedInfo.type === 'instagram-reel' ? 640 : 520,
+                                  border: 'none', background: '#000',
+                                }}
                                 allowTransparency="true"
                                 scrolling="no"
                                 loading="lazy"
@@ -648,7 +645,7 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team, onMoveToStatus }
                             {embedInfo.type === 'tiktok' && (
                               <iframe
                                 src={`https://www.tiktok.com/embed/v2/${embedInfo.id}`}
-                                style={{ width: '100%', height: 580, border: 'none', background: '#000' }}
+                                style={{ width: '100%', height: 640, border: 'none', background: '#000' }}
                                 allowFullScreen
                                 scrolling="no"
                                 loading="lazy"
@@ -658,6 +655,7 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team, onMoveToStatus }
                               <iframe
                                 src={`https://www.youtube.com/embed/${embedInfo.id}`}
                                 style={{ width: '100%', aspectRatio: '16/9', border: 'none', background: '#000' }}
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                                 allowFullScreen
                                 loading="lazy"
                               />
@@ -665,14 +663,14 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team, onMoveToStatus }
                             {embedInfo.type === 'youtube-short' && (
                               <iframe
                                 src={`https://www.youtube.com/embed/${embedInfo.id}`}
-                                style={{ width: '100%', height: 580, border: 'none', background: '#000' }}
+                                style={{ width: '100%', height: 640, border: 'none', background: '#000' }}
                                 allowFullScreen
                                 loading="lazy"
                               />
                             )}
                             {embedInfo.type === 'facebook' && (
                               <iframe
-                                src={`https://www.facebook.com/plugins/post.php?href=${encodeURIComponent(url)}&show_text=false&width=500`}
+                                src={`https://www.facebook.com/plugins/post.php?href=${encodeURIComponent(url)}&show_text=false&width=400`}
                                 style={{ width: '100%', height: 500, border: 'none', background: '#000' }}
                                 scrolling="no"
                                 allowFullScreen
@@ -684,19 +682,18 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team, onMoveToStatus }
                       )}
 
                       {/* No embed — show icon */}
-                      {(!url || !embedInfo) && (
-                        <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                      {(!url || !embedInfo || embedInfo.type === 'link') && (
+                        <div style={{ textAlign: 'center', padding: '20px 0' }}>
                           <span style={{ fontSize: 40, display: 'block', marginBottom: 8 }}>✦</span>
                           <div style={{ fontSize: 16, fontWeight: 700, color: C.teal }}>Publicado</div>
+                          {!url && <div style={{ fontSize: 12, color: C.txtM, marginTop: 4 }}>Pega el link de publicación abajo para ver la vista previa</div>}
                         </div>
                       )}
 
-                      {/* Date + Link — side by side on desktop */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                        {/* Fecha de publicación */}
+                      {/* Date + Link — side by side */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 16 }}>
                         <div>
                           <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Fecha de publicación</div>
-                          <div style={{ fontSize: 10, color: C.txtM, marginBottom: 6 }}>Aparece en el calendario del cliente</div>
                           <input
                             type="date"
                             value={local.scheduled_date || local.deadline || ''}
@@ -707,11 +704,8 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team, onMoveToStatus }
                             style={{ ...S.inp, colorScheme: 'dark' }}
                           />
                         </div>
-
-                        {/* Link */}
                         <div>
                           <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Link de publicación</div>
-                          <div style={{ fontSize: 10, color: C.txtM, marginBottom: 6 }}>Instagram, TikTok, YouTube, Facebook</div>
                           <input
                             type="url"
                             placeholder="https://www.instagram.com/p/..."
