@@ -144,6 +144,12 @@ function getEmbedInfo(url) {
       return { type: 'facebook', platform: 'Facebook', icon: '👤' };
     }
 
+    // Google Drive
+    if (host === 'drive.google.com') {
+      const fileMatch = path.match(/\/file\/d\/([A-Za-z0-9_-]+)/);
+      if (fileMatch) return { type: 'gdrive', id: fileMatch[1], platform: 'Google Drive', icon: '📁' };
+    }
+
     return null;
   } catch {
     return null;
@@ -367,6 +373,7 @@ function Card({ piece, onClick, team, onDragStart, isDragging }) {
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
         <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: `${pc}15`, color: pc, fontWeight: 700 }}>{pl}</span>
+        {piece.piece_category === 'ad_creative' && <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: `${C.amb}15`, color: C.amb, fontWeight: 700 }}>Ad</span>}
       </div>
       <div style={{ fontSize: 12, fontWeight: 600, color: C.txt, lineHeight: '16px', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{piece.title}</div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -486,7 +493,7 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team, onMoveToStatus }
       const dbFields = {};
       const allowedKeys = [
         'title','type','status','deadline','scheduled_date','period','client_id',
-        'publish_url','piece_category',
+        'publish_url','piece_category','campaign_name',
         'research_assigned','research_output','research_comment',
         'guion_assigned','guion_output',
         'aprobacion_assigned','aprobacion_output',
@@ -611,17 +618,55 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team, onMoveToStatus }
               // Detect platform from URL for embed
               const url = local.publish_url || '';
               const embedInfo = getEmbedInfo(url);
+              const isAdCreative = local.piece_category === 'ad_creative';
 
               return (
                 <div style={{ padding: '10px 0' }}>
                   {local.status === 'publicado' ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-                      {/* Embed preview — centered with correct sizing */}
+                      {/* Ads toggle */}
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 12,
+                        padding: '12px 16px', borderRadius: 10,
+                        background: isAdCreative ? `${C.amb}10` : C.card,
+                        border: `1px solid ${isAdCreative ? C.amb + '33' : C.brd}`,
+                        transition: 'all .15s',
+                      }}>
+                        <button
+                          onClick={() => set('piece_category', isAdCreative ? 'organic' : 'ad_creative')}
+                          style={{
+                            width: 44, height: 24, borderRadius: 12, border: 'none',
+                            background: isAdCreative ? C.amb : C.brd,
+                            position: 'relative', cursor: 'pointer',
+                            transition: 'background .2s',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <div style={{
+                            width: 18, height: 18, borderRadius: '50%',
+                            background: '#fff',
+                            position: 'absolute', top: 3,
+                            left: isAdCreative ? 23 : 3,
+                            transition: 'left .2s',
+                            boxShadow: '0 1px 3px rgba(0,0,0,.3)',
+                          }} />
+                        </button>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: isAdCreative ? C.amb : C.txt }}>
+                            {isAdCreative ? '📢 Creative para Ads' : '📱 Contenido orgánico'}
+                          </div>
+                          <div style={{ fontSize: 11, color: C.txtM, marginTop: 1 }}>
+                            {isAdCreative
+                              ? 'No aparece en el calendario — el cliente lo ve en su carpeta de Anuncios'
+                              : 'Aparece en el calendario del cliente con la fecha de publicación'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Embed preview */}
                       {url && embedInfo && embedInfo.type !== 'link' && (
-                        <div style={{
-                          display: 'flex', justifyContent: 'center',
-                        }}>
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
                           <div style={{
                             width: embedInfo.type === 'youtube' ? '100%' : 400,
                             maxWidth: '100%',
@@ -632,50 +677,24 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team, onMoveToStatus }
                               <iframe
                                 key={embedInfo.id}
                                 src={`https://www.instagram.com/${embedInfo.type === 'instagram-reel' ? 'reel' : 'p'}/${embedInfo.id}/embed/captioned/`}
-                                style={{
-                                  width: '100%',
-                                  minHeight: embedInfo.type === 'instagram-reel' ? 640 : 520,
-                                  border: 'none', background: '#000',
-                                }}
-                                allowTransparency="true"
-                                scrolling="no"
-                                loading="lazy"
+                                style={{ width: '100%', minHeight: embedInfo.type === 'instagram-reel' ? 640 : 520, border: 'none', background: '#000' }}
+                                allowTransparency="true" scrolling="no" loading="lazy"
                               />
                             )}
                             {embedInfo.type === 'tiktok' && (
-                              <iframe
-                                src={`https://www.tiktok.com/embed/v2/${embedInfo.id}`}
-                                style={{ width: '100%', height: 640, border: 'none', background: '#000' }}
-                                allowFullScreen
-                                scrolling="no"
-                                loading="lazy"
-                              />
+                              <iframe src={`https://www.tiktok.com/embed/v2/${embedInfo.id}`} style={{ width: '100%', height: 640, border: 'none', background: '#000' }} allowFullScreen scrolling="no" loading="lazy" />
                             )}
                             {embedInfo.type === 'youtube' && (
-                              <iframe
-                                src={`https://www.youtube.com/embed/${embedInfo.id}`}
-                                style={{ width: '100%', aspectRatio: '16/9', border: 'none', background: '#000' }}
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                allowFullScreen
-                                loading="lazy"
-                              />
+                              <iframe src={`https://www.youtube.com/embed/${embedInfo.id}`} style={{ width: '100%', aspectRatio: '16/9', border: 'none', background: '#000' }} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen loading="lazy" />
                             )}
                             {embedInfo.type === 'youtube-short' && (
-                              <iframe
-                                src={`https://www.youtube.com/embed/${embedInfo.id}`}
-                                style={{ width: '100%', height: 640, border: 'none', background: '#000' }}
-                                allowFullScreen
-                                loading="lazy"
-                              />
+                              <iframe src={`https://www.youtube.com/embed/${embedInfo.id}`} style={{ width: '100%', height: 640, border: 'none', background: '#000' }} allowFullScreen loading="lazy" />
                             )}
                             {embedInfo.type === 'facebook' && (
-                              <iframe
-                                src={`https://www.facebook.com/plugins/post.php?href=${encodeURIComponent(url)}&show_text=false&width=400`}
-                                style={{ width: '100%', height: 500, border: 'none', background: '#000' }}
-                                scrolling="no"
-                                allowFullScreen
-                                loading="lazy"
-                              />
+                              <iframe src={`https://www.facebook.com/plugins/post.php?href=${encodeURIComponent(url)}&show_text=false&width=400`} style={{ width: '100%', height: 500, border: 'none', background: '#000' }} scrolling="no" allowFullScreen loading="lazy" />
+                            )}
+                            {embedInfo.type === 'gdrive' && (
+                              <iframe src={`https://drive.google.com/file/d/${embedInfo.id}/preview`} style={{ width: '100%', aspectRatio: '16/9', border: 'none', background: '#000' }} allow="autoplay" loading="lazy" />
                             )}
                           </div>
                         </div>
@@ -684,37 +703,51 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team, onMoveToStatus }
                       {/* No embed — show icon */}
                       {(!url || !embedInfo || embedInfo.type === 'link') && (
                         <div style={{ textAlign: 'center', padding: '20px 0' }}>
-                          <span style={{ fontSize: 40, display: 'block', marginBottom: 8 }}>✦</span>
-                          <div style={{ fontSize: 16, fontWeight: 700, color: C.teal }}>Publicado</div>
-                          {!url && <div style={{ fontSize: 12, color: C.txtM, marginTop: 4 }}>Pega el link de publicación abajo para ver la vista previa</div>}
+                          <span style={{ fontSize: 40, display: 'block', marginBottom: 8 }}>{isAdCreative ? '📢' : '✦'}</span>
+                          <div style={{ fontSize: 16, fontWeight: 700, color: isAdCreative ? C.amb : C.teal }}>{isAdCreative ? 'Creative para Ads' : 'Publicado'}</div>
+                          {!url && <div style={{ fontSize: 12, color: C.txtM, marginTop: 4 }}>Pega el link abajo para ver la vista previa</div>}
                         </div>
                       )}
 
-                      {/* Date + Link — side by side */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 16 }}>
+                      {/* Date + Link (date hidden for ads) */}
+                      <div style={{ display: 'grid', gridTemplateColumns: isAdCreative ? '1fr' : '200px 1fr', gap: 16 }}>
+                        {!isAdCreative && (
+                          <div>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Fecha de publicación</div>
+                            <input
+                              type="date"
+                              value={local.scheduled_date || local.deadline || ''}
+                              onChange={e => { set('scheduled_date', e.target.value); set('deadline', e.target.value); }}
+                              style={{ ...S.inp, colorScheme: 'dark' }}
+                            />
+                          </div>
+                        )}
                         <div>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Fecha de publicación</div>
-                          <input
-                            type="date"
-                            value={local.scheduled_date || local.deadline || ''}
-                            onChange={e => {
-                              set('scheduled_date', e.target.value);
-                              set('deadline', e.target.value);
-                            }}
-                            style={{ ...S.inp, colorScheme: 'dark' }}
-                          />
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Link de publicación</div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>
+                            {isAdCreative ? 'Link del creative (Drive, Instagram, etc.)' : 'Link de publicación'}
+                          </div>
                           <input
                             type="url"
-                            placeholder="https://www.instagram.com/p/..."
+                            placeholder={isAdCreative ? 'https://drive.google.com/file/d/...' : 'https://www.instagram.com/p/...'}
                             value={local.publish_url || ''}
                             onChange={e => set('publish_url', e.target.value)}
                             style={S.inp}
                           />
                         </div>
                       </div>
+
+                      {/* Campaign name for ads */}
+                      {isAdCreative && (
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Nombre de campaña</div>
+                          <input
+                            placeholder="Ej: Promo Marzo — 2x1 Mechas"
+                            value={local.campaign_name || ''}
+                            onChange={e => set('campaign_name', e.target.value)}
+                            style={S.inp}
+                          />
+                        </div>
+                      )}
 
                       {/* Actions */}
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
