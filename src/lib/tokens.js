@@ -18,7 +18,7 @@ export const FLOW_FULL = [
   {k:'aprobacion',l:'Aprobación',c:C.amb,ot:'text',ol:'Notas'},
   {k:'grabacion',l:'Grabación',c:C.cor,ot:'file',ol:'Proyecto'},
   {k:'edicion',l:'Edición',c:C.purp,ot:'file',ol:'Editado'},
-  {k:'revision_cliente',l:'Rev. cliente',c:C.amb,ot:'text',ol:'Feedback'},
+  {k:'revision_cliente',l:'Rev. cliente',c:C.amb,ot:'url',ol:'Link de Drive'},
   {k:'publicado',l:'Publicado',c:C.teal,ot:'text',ol:'Link'},
 ];
 
