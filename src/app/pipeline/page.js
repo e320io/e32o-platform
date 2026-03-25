@@ -25,6 +25,8 @@ FLOW_FULL.forEach(f => {
     OT[f.k] = f.ot; // 'url','text','file'
   }
 });
+// Override: revision_cliente output is a Drive URL, not text
+OT['revision_cliente'] = 'url';
 
 // Client plans (mirrors brief)
 // UUID map for clients
@@ -526,12 +528,17 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team, onMoveToStatus }
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
             <div style={{ flex: 1 }}>
               {editTitle ? (
-                <input value={local.title} onChange={e => set('title', e.target.value)} onBlur={() => setEditTitle(false)} onKeyDown={e => e.key === 'Enter' && setEditTitle(false)} autoFocus style={{ ...S.inp, fontSize: 16, fontWeight: 700, padding: '4px 8px', background: 'transparent', border: `1px solid ${C.brdH}` }} />
+                <input value={local.title} onChange={e => set('title', e.target.value)} onBlur={() => { setEditTitle(false); handleSave(); }} onKeyDown={e => { if (e.key === 'Enter') { setEditTitle(false); handleSave(); } }} autoFocus style={{ ...S.inp, fontSize: 16, fontWeight: 700, padding: '6px 10px', background: C.bg, border: `1px solid ${C.acc}44`, width: '100%' }} />
               ) : (
-                <h2 onClick={() => setEditTitle(true)} style={{ fontSize: 16, fontWeight: 700, color: C.wh, margin: 0, cursor: 'pointer' }} title="Clic para editar">{local.title}</h2>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <h2 style={{ fontSize: 16, fontWeight: 700, color: C.wh, margin: 0, flex: 1 }}>{local.title}</h2>
+                  <button onClick={() => setEditTitle(true)} style={{ background: 'none', border: `1px solid ${C.brd}`, borderRadius: 6, padding: '3px 8px', color: C.txtM, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>✏️ Editar</button>
+                </div>
               )}
               <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                <Badge color={pc}>{pt}</Badge>
+                <select value={local.type} onChange={e => set('type', e.target.value)} style={{ background: `${pc}15`, border: `1px solid ${pc}33`, borderRadius: 20, color: pc, padding: '2px 20px 2px 8px', fontSize: 11, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', outline: 'none', appearance: 'none', WebkitAppearance: 'none', backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' fill='${encodeURIComponent(pc)}' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center' }}>
+                  {Object.entries(PIECE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
                 <Badge color={sg.c}>{sg.l}</Badge>
                 {od && <Badge color={C.red}>Atrasada</Badge>}
                 <span style={{ fontSize: 12, color: C.txtM }}>Deadline: </span>
@@ -819,8 +826,21 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team, onMoveToStatus }
 
                     {ot === 'url' && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        <input type="url" placeholder="URL de referencia viral (Instagram, TikTok…)" value={local.research_output || ''} onChange={e => set('research_output', e.target.value)} style={S.inp} />
-                        <textarea placeholder="¿Por qué funciona? Hook, formato, duración, CTA…" value={local.research_comment || ''} onChange={e => set('research_comment', e.target.value)} rows={3} style={S.inp} />
+                        <input type="url" placeholder={sk === 'research' ? "URL de referencia viral (Instagram, TikTok…)" : "Link de Drive, Instagram, etc."} value={output || ''} onChange={e => set(of2, e.target.value)} style={S.inp} />
+                        {output && (() => {
+                          const ei = getEmbedInfo(output);
+                          if (ei && ei.type !== 'link') return (
+                            <div style={{ borderRadius: 10, overflow: 'hidden', border: `1px solid ${C.brd}`, maxWidth: 400 }}>
+                              {(ei.type === 'instagram' || ei.type === 'instagram-reel') && <iframe src={`https://www.instagram.com/${ei.type === 'instagram-reel' ? 'reel' : 'p'}/${ei.id}/embed/captioned/`} style={{ width: '100%', minHeight: ei.type === 'instagram-reel' ? 500 : 420, border: 'none', background: '#000' }} scrolling="no" loading="lazy" />}
+                              {ei.type === 'gdrive' && <iframe src={`https://drive.google.com/file/d/${ei.id}/preview`} style={{ width: '100%', aspectRatio: '16/9', border: 'none' }} allow="autoplay" loading="lazy" />}
+                              {ei.type === 'youtube' && <iframe src={`https://www.youtube.com/embed/${ei.id}`} style={{ width: '100%', aspectRatio: '16/9', border: 'none' }} allowFullScreen loading="lazy" />}
+                            </div>
+                          );
+                          return <a href={output} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: C.acc, textDecoration: 'none', padding: '4px 10px', background: C.accDim, borderRadius: 6, fontWeight: 600 }}>↗ Abrir link</a>;
+                        })()}
+                        {sk === 'research' && (
+                          <textarea placeholder="¿Por qué funciona? Hook, formato, duración, CTA…" value={local.research_comment || ''} onChange={e => set('research_comment', e.target.value)} rows={3} style={S.inp} />
+                        )}
                       </div>
                     )}
                     {ot === 'text' && (
