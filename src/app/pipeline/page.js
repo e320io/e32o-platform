@@ -124,6 +124,7 @@ function pepeGeneratePieces(clientId, period, pool) {
         type: t,
         status: 'pendiente',
         deadline,
+        scheduled_date: deadline,
         period,
       };
 
@@ -270,7 +271,7 @@ function PoolPanel({ pool, setPool, team, clientColor, onGenerate, pieceCount })
 function Card({ piece, onClick, team, onDragStart, isDragging }) {
   const pl = PIECE_LABELS[piece.type] || piece.type;
   const pc = PIECE_COLORS[piece.type] || C.txtS;
-  const od = isOD(piece.deadline) && piece.status !== 'publicado';
+  const od = isOD(piece.scheduled_date || piece.deadline) && piece.status !== 'publicado';
   const au = AF[piece.status] ? piece[AF[piece.status]] : null;
 
   return (
@@ -317,7 +318,7 @@ function Card({ piece, onClick, team, onDragStart, isDragging }) {
       </div>
       <div style={{ fontSize: 12, fontWeight: 600, color: C.txt, lineHeight: '16px', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{piece.title}</div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 10, color: od ? C.red : C.txtM, fontWeight: od ? 600 : 400 }}>{fmtDl(piece.deadline)}</span>
+        <span style={{ fontSize: 10, color: od ? C.red : C.txtM, fontWeight: od ? 600 : 400 }}>{fmtDl(piece.scheduled_date || piece.deadline)}</span>
         {au && <Av username={au} team={team} size={18} />}
       </div>
     </div>
@@ -422,10 +423,29 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team, onMoveToStatus }
 
   const handleSave = async () => {
     setSaving(true);
-    if (!local.id.startsWith('gen-') && !local.id.startsWith('new-')) {
-      try { await supabase.from('content_pieces').update(local).eq('id', local.id); } catch {}
+    // Ensure scheduled_date is synced with deadline
+    const toSave = { ...local };
+    if (toSave.deadline && !toSave.scheduled_date) toSave.scheduled_date = toSave.deadline;
+    if (toSave.scheduled_date && !toSave.deadline) toSave.deadline = toSave.scheduled_date;
+    setLocal(toSave);
+
+    if (!toSave.id.startsWith('gen-') && !toSave.id.startsWith('new-')) {
+      // Only send fields that exist in the DB
+      const dbFields = {};
+      const allowedKeys = [
+        'title','type','status','deadline','scheduled_date','period','client_id',
+        'publish_url','piece_category',
+        'research_assigned','research_output','research_comment',
+        'guion_assigned','guion_output',
+        'aprobacion_assigned','aprobacion_output',
+        'grabacion_assigned','grabacion_output',
+        'edicion_assigned','edicion_output',
+        'revision_cliente_assigned','revision_cliente_output',
+      ];
+      allowedKeys.forEach(k => { if (toSave[k] !== undefined) dbFields[k] = toSave[k]; });
+      try { await supabase.from('content_pieces').update(dbFields).eq('id', toSave.id); } catch (e) { console.error('Save error:', e); }
     }
-    onUpdate(local);
+    onUpdate(toSave);
     setSaving(false);
   };
 
@@ -456,7 +476,7 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team, onMoveToStatus }
                 <Badge color={sg.c}>{sg.l}</Badge>
                 {od && <Badge color={C.red}>Atrasada</Badge>}
                 <span style={{ fontSize: 12, color: C.txtM }}>Deadline: </span>
-                <input type="date" value={local.deadline || ''} onChange={e => set('deadline', e.target.value)} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 6, color: C.txt, padding: '2px 8px', fontSize: 12, fontFamily: 'inherit', outline: 'none', colorScheme: 'dark' }} />
+                <input type="date" value={local.deadline || local.scheduled_date || ''} onChange={e => { set('deadline', e.target.value); set('scheduled_date', e.target.value); }} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 6, color: C.txt, padding: '2px 8px', fontSize: 12, fontFamily: 'inherit', outline: 'none', colorScheme: 'dark' }} />
               </div>
 
               {/* ── Quick move dropdown for founder ── */}
@@ -537,15 +557,70 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team, onMoveToStatus }
             // For publicado tab
             if (sk === 'publicado') {
               return (
-                <div style={{ textAlign: 'center', padding: 40 }}>
+                <div style={{ padding: '20px 0' }}>
                   {local.status === 'publicado' ? (
-                    <div>
-                      <span style={{ fontSize: 40, display: 'block', marginBottom: 12 }}>✦</span>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: C.teal }}>Publicado</div>
-                      <input placeholder="Link de publicación" value={local.publish_url || ''} onChange={e => set('publish_url', e.target.value)} style={{ ...S.inp, marginTop: 16, maxWidth: 400, margin: '16px auto 0' }} />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                      <div style={{ textAlign: 'center' }}>
+                        <span style={{ fontSize: 40, display: 'block', marginBottom: 8 }}>✦</span>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: C.teal }}>Publicado</div>
+                      </div>
+
+                      {/* Fecha de publicación */}
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Fecha de publicación</div>
+                        <div style={{ fontSize: 11, color: C.txtM, marginBottom: 6 }}>Esta fecha aparece en el calendario del cliente</div>
+                        <input
+                          type="date"
+                          value={local.scheduled_date || local.deadline || ''}
+                          onChange={e => {
+                            set('scheduled_date', e.target.value);
+                            set('deadline', e.target.value);
+                          }}
+                          style={{ ...S.inp, maxWidth: 220, colorScheme: 'dark' }}
+                        />
+                      </div>
+
+                      {/* Link de publicación */}
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Link de publicación</div>
+                        <div style={{ fontSize: 11, color: C.txtM, marginBottom: 6 }}>Instagram, TikTok, YouTube, etc.</div>
+                        <input
+                          type="url"
+                          placeholder="https://www.instagram.com/p/..."
+                          value={local.publish_url || ''}
+                          onChange={e => set('publish_url', e.target.value)}
+                          style={S.inp}
+                        />
+                        {local.publish_url && (
+                          <a href={local.publish_url} target="_blank" rel="noopener noreferrer" style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                            fontSize: 12, color: C.acc, textDecoration: 'none',
+                            padding: '6px 12px', background: C.accDim, borderRadius: 6,
+                            marginTop: 8,
+                          }}>
+                            ↗ Abrir publicación
+                          </a>
+                        )}
+                      </div>
+
+                      {/* Guardar */}
+                      <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                        <button onClick={handleSave} style={S.btn(true)}>
+                          {saving ? 'Guardando…' : '💾 Guardar'}
+                        </button>
+                      </div>
                     </div>
                   ) : (
-                    <div style={{ color: C.txtM, fontSize: 13 }}>Esta pieza aún no llega a publicación.</div>
+                    <div style={{ textAlign: 'center', padding: 20 }}>
+                      <div style={{ color: C.txtM, fontSize: 13, marginBottom: 12 }}>Esta pieza aún no llega a publicación.</div>
+                      <button onClick={() => {
+                        const up = { ...local, status: 'publicado' };
+                        setLocal(up);
+                        onMoveToStatus(piece.id, 'publicado');
+                      }} style={S.btn(true)}>
+                        Marcar como publicado →
+                      </button>
+                    </div>
                   )}
                 </div>
               );
@@ -883,7 +958,7 @@ export default function PipelinePage() {
     const newPiece = {
       id: `new-${Date.now()}`,
       client_id: selClient, title: 'Nueva pieza', type: 'reel', status: 'pendiente',
-      deadline: `${selMonth}-15`, period: selMonth,
+      deadline: `${selMonth}-15`, scheduled_date: `${selMonth}-15`, period: selMonth,
     };
     ACTIVE_STAGES.forEach(st => {
       const stagePool = pool[st.k] || [];
