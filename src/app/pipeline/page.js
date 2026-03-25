@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { getSession, isAdmin } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
@@ -114,7 +114,6 @@ function pepeGeneratePieces(clientId, period, pool) {
       idx++;
       const pieceNum = idx;
       const label = PIECE_LABELS[t] || t;
-      // Spread deadlines across the month
       const day = Math.min(Math.ceil((idx / plan.pieces.reduce((s, p) => s + p.n, 0)) * 28) + 1, 28);
       const deadline = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
@@ -128,7 +127,6 @@ function pepeGeneratePieces(clientId, period, pool) {
         period,
       };
 
-      // Round-robin assign from pool for each stage
       ACTIVE_STAGES.forEach(st => {
         const stagePool = pool[st.k] || [];
         if (stagePool.length > 0) {
@@ -205,13 +203,11 @@ function PoolPanel({ pool, setPool, team, clientColor, onGenerate, pieceCount })
       display: 'flex', flexDirection: 'column', height: 'calc(100vh - 56px)',
       overflowY: 'auto',
     }}>
-      {/* Header */}
       <div style={{ padding: '16px 18px 12px', borderBottom: `1px solid ${C.brd}` }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.wh, marginBottom: 4 }}>Pool del equipo</div>
         <div style={{ fontSize: 11, color: C.txtM }}>Asigna quién trabaja en cada etapa. Pepe reparte las piezas automáticamente.</div>
       </div>
 
-      {/* Stages */}
       <div style={{ padding: '8px 12px', flex: 1 }}>
         {ACTIVE_STAGES.map(st => {
           const assigned = pool[st.k] || [];
@@ -247,7 +243,6 @@ function PoolPanel({ pool, setPool, team, clientColor, onGenerate, pieceCount })
         })}
       </div>
 
-      {/* Generate button */}
       <div style={{ padding: '12px 16px', borderTop: `1px solid ${C.brd}` }}>
         {pieceCount > 0 ? (
           <div style={{ fontSize: 11, color: C.txtM, textAlign: 'center', marginBottom: 8 }}>
@@ -270,21 +265,52 @@ function PoolPanel({ pool, setPool, team, clientColor, onGenerate, pieceCount })
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// KANBAN CARD
+// KANBAN CARD — with drag support
 // ═══════════════════════════════════════════════════════════════════════════
-function Card({ piece, onClick, team }) {
+function Card({ piece, onClick, team, onDragStart, isDragging }) {
   const pl = PIECE_LABELS[piece.type] || piece.type;
   const pc = PIECE_COLORS[piece.type] || C.txtS;
   const od = isOD(piece.deadline) && piece.status !== 'publicado';
   const au = AF[piece.status] ? piece[AF[piece.status]] : null;
 
   return (
-    <div onClick={() => onClick(piece)} style={{
-      background: C.card, border: `1px solid ${od ? C.red + '33' : C.brd}`, borderRadius: 8,
-      padding: '9px 11px', cursor: 'pointer', transition: 'all .12s',
-    }}
-      onMouseEnter={e => { e.currentTarget.style.background = C.cardH; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-      onMouseLeave={e => { e.currentTarget.style.background = C.card; e.currentTarget.style.transform = 'none'; }}
+    <div
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('text/plain', piece.id);
+        e.dataTransfer.effectAllowed = 'move';
+        onDragStart(piece.id);
+        // Make drag image slightly transparent
+        requestAnimationFrame(() => {
+          e.target.style.opacity = '0.4';
+        });
+      }}
+      onDragEnd={(e) => {
+        e.target.style.opacity = '1';
+        onDragStart(null);
+      }}
+      onClick={() => onClick(piece)}
+      style={{
+        background: isDragging ? C.cardH : C.card,
+        border: `1px solid ${od ? C.red + '33' : C.brd}`,
+        borderRadius: 8,
+        padding: '9px 11px',
+        cursor: 'grab',
+        transition: 'all .12s',
+        opacity: isDragging ? 0.4 : 1,
+      }}
+      onMouseEnter={e => {
+        if (!isDragging) {
+          e.currentTarget.style.background = C.cardH;
+          e.currentTarget.style.transform = 'translateY(-1px)';
+        }
+      }}
+      onMouseLeave={e => {
+        if (!isDragging) {
+          e.currentTarget.style.background = C.card;
+          e.currentTarget.style.transform = 'none';
+        }
+      }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
         <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: `${pc}15`, color: pc, fontWeight: 700 }}>{pl}</span>
@@ -298,17 +324,80 @@ function Card({ piece, onClick, team }) {
   );
 }
 
-function Column({ stage, pieces, onCardClick, team }) {
+function Column({ stage, pieces, onCardClick, team, onDragStart, draggingId, onDrop, canDrop }) {
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (!dragOver) setDragOver(true);
+  };
+
+  const handleDragLeave = (e) => {
+    // Only set dragOver false if we're actually leaving the column
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX, y = e.clientY;
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+      setDragOver(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const pieceId = e.dataTransfer.getData('text/plain');
+    if (pieceId) {
+      onDrop(pieceId, stage.k);
+    }
+  };
+
   return (
-    <div style={{ flex: '0 0 195px', display: 'flex', flexDirection: 'column', background: C.bg, borderRadius: 10, border: `1px solid ${C.brd}`, minHeight: 180, maxHeight: 'calc(100vh - 180px)' }}>
-      <div style={{ padding: '9px 11px', borderBottom: `1px solid ${C.brd}`, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+    <div
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      style={{
+        flex: '0 0 195px',
+        display: 'flex',
+        flexDirection: 'column',
+        background: dragOver ? `${stage.c}08` : C.bg,
+        borderRadius: 10,
+        border: `1px solid ${dragOver ? stage.c + '44' : C.brd}`,
+        minHeight: 180,
+        maxHeight: 'calc(100vh - 180px)',
+        transition: 'background .15s, border-color .15s',
+      }}
+    >
+      <div style={{ padding: '9px 11px', borderBottom: `1px solid ${dragOver ? stage.c + '22' : C.brd}`, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, transition: 'border-color .15s' }}>
         <span style={{ width: 7, height: 7, borderRadius: '50%', background: stage.c }} />
         <span style={{ fontSize: 11.5, fontWeight: 700, color: C.txt }}>{stage.l}</span>
         <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 600, color: C.txtM, background: C.card, padding: '1px 6px', borderRadius: 8 }}>{pieces.length}</span>
       </div>
       <div style={{ padding: 5, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto', flex: 1 }}>
-        {pieces.map(p => <Card key={p.id} piece={p} onClick={onCardClick} team={team} />)}
-        {!pieces.length && <div style={{ padding: 16, textAlign: 'center', fontSize: 11, color: C.txtM, fontStyle: 'italic' }}>—</div>}
+        {pieces.map(p => (
+          <Card
+            key={p.id}
+            piece={p}
+            onClick={onCardClick}
+            team={team}
+            onDragStart={onDragStart}
+            isDragging={draggingId === p.id}
+          />
+        ))}
+        {!pieces.length && (
+          <div style={{
+            padding: 16, textAlign: 'center', fontSize: 11, color: C.txtM, fontStyle: 'italic',
+            border: dragOver ? `2px dashed ${stage.c}33` : '2px dashed transparent',
+            borderRadius: 6,
+            minHeight: 60,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'border-color .15s',
+          }}>
+            {dragOver ? 'Soltar aquí' : '—'}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -317,7 +406,7 @@ function Column({ stage, pieces, onCardClick, team }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // PIECE DETAIL MODAL — full view/edit for every stage
 // ═══════════════════════════════════════════════════════════════════════════
-function PieceModal({ piece, onClose, onUpdate, onDelete, team }) {
+function PieceModal({ piece, onClose, onUpdate, onDelete, team, onMoveToStatus }) {
   const [local, setLocal] = useState({ ...piece });
   const [tab, setTab] = useState(piece.status === 'pendiente' ? 'research' : piece.status);
   const [saving, setSaving] = useState(false);
@@ -368,6 +457,39 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team }) {
                 {od && <Badge color={C.red}>Atrasada</Badge>}
                 <span style={{ fontSize: 12, color: C.txtM }}>Deadline: </span>
                 <input type="date" value={local.deadline || ''} onChange={e => set('deadline', e.target.value)} style={{ background: 'transparent', border: `1px solid ${C.brd}`, borderRadius: 6, color: C.txt, padding: '2px 8px', fontSize: 12, fontFamily: 'inherit', outline: 'none', colorScheme: 'dark' }} />
+              </div>
+
+              {/* ── Quick move dropdown for founder ── */}
+              <div style={{ display: 'flex', gap: 6, marginTop: 10, alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: C.txtM, fontWeight: 600 }}>Mover a:</span>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {KANBAN_COLS.map(col => {
+                    const isActive = local.status === col.k;
+                    return (
+                      <button
+                        key={col.k}
+                        onClick={() => {
+                          if (isActive) return;
+                          const up = { ...local, status: col.k };
+                          setLocal(up);
+                          onMoveToStatus(piece.id, col.k);
+                          setTab(col.k === 'pendiente' ? 'research' : col.k);
+                        }}
+                        style={{
+                          padding: '3px 9px', borderRadius: 6, fontSize: 10, fontWeight: 600,
+                          border: `1px solid ${isActive ? col.c + '66' : C.brd}`,
+                          background: isActive ? `${col.c}18` : 'transparent',
+                          color: isActive ? col.c : C.txtM,
+                          cursor: isActive ? 'default' : 'pointer',
+                          fontFamily: 'inherit',
+                          transition: 'all .12s',
+                        }}
+                      >
+                        {col.l}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
@@ -457,7 +579,7 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team }) {
                   </div>
                 )}
 
-                {/* Output */}
+                {/* Output — founder can always edit, regardless of stage */}
                 {of2 && (
                   <div>
                     <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
@@ -466,30 +588,30 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team }) {
 
                     {ot === 'url' && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        <input type="url" placeholder="URL de referencia viral (Instagram, TikTok…)" value={local.research_output || ''} onChange={e => set('research_output', e.target.value)} disabled={isFut} style={{ ...S.inp, opacity: isFut ? .4 : 1 }} />
-                        <textarea placeholder="¿Por qué funciona? Hook, formato, duración, CTA…" value={local.research_comment || ''} onChange={e => set('research_comment', e.target.value)} rows={3} disabled={isFut} style={{ ...S.inp, opacity: isFut ? .4 : 1 }} />
+                        <input type="url" placeholder="URL de referencia viral (Instagram, TikTok…)" value={local.research_output || ''} onChange={e => set('research_output', e.target.value)} style={S.inp} />
+                        <textarea placeholder="¿Por qué funciona? Hook, formato, duración, CTA…" value={local.research_comment || ''} onChange={e => set('research_comment', e.target.value)} rows={3} style={S.inp} />
                       </div>
                     )}
                     {ot === 'text' && (
-                      <textarea placeholder={'• Abre con pregunta provocativa\n• Muestra resultado en 3 seg\n• CTA directo'} value={output || ''} rows={7} onChange={e => set(of2, e.target.value)} disabled={isFut} style={{ ...S.inp, opacity: isFut ? .4 : 1, fontFamily: "'DM Mono', monospace", lineHeight: 1.8 }} />
+                      <textarea placeholder={'• Abre con pregunta provocativa\n• Muestra resultado en 3 seg\n• CTA directo'} value={output || ''} rows={7} onChange={e => set(of2, e.target.value)} style={{ ...S.inp, fontFamily: "'DM Mono', monospace", lineHeight: 1.8 }} />
                     )}
                     {ot === 'file' && (
                       output ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: C.card, borderRadius: 8, border: `1px solid ${C.brd}` }}>
                           <span style={{ fontSize: 20 }}>📎</span>
                           <span style={{ fontSize: 13, color: C.txt, flex: 1 }}>{output}</span>
-                          {!isFut && <button onClick={() => set(of2, null)} style={{ background: 'none', border: 'none', color: C.red, fontSize: 12, cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit' }}>Quitar</button>}
+                          <button onClick={() => set(of2, null)} style={{ background: 'none', border: 'none', color: C.red, fontSize: 12, cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit' }}>Quitar</button>
                         </div>
                       ) : (
                         <label style={{
                           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8,
-                          padding: '30px 20px', background: C.card, border: `2px dashed ${isFut ? C.brd : C.brdH}`,
-                          borderRadius: 8, cursor: isFut ? 'default' : 'pointer', opacity: isFut ? .4 : 1,
+                          padding: '30px 20px', background: C.card, border: `2px dashed ${C.brdH}`,
+                          borderRadius: 8, cursor: 'pointer',
                           transition: 'border-color .15s',
                         }}>
                           <span style={{ fontSize: 28, opacity: .4 }}>📤</span>
-                          <span style={{ fontSize: 12, color: C.txtM }}>{isFut ? 'Pendiente' : 'Clic para subir archivo'}</span>
-                          {!isFut && <input type="file" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) set(of2, f.name); }} />}
+                          <span style={{ fontSize: 12, color: C.txtM }}>Clic para subir archivo</span>
+                          <input type="file" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) set(of2, f.name); }} />
                         </label>
                       )
                     )}
@@ -501,12 +623,11 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team }) {
                   <button onClick={handleSave} style={S.btn(false)}>
                     {saving ? 'Guardando…' : '💾 Guardar'}
                   </button>
-                  {isCur && output && ns && (
+                  {isCur && ns && (
                     <button onClick={() => handleAdvance(sk)} style={S.btn(true)}>
                       Avanzar a {ns.l} →
                     </button>
                   )}
-                  {isFut && <span style={{ fontSize: 12, color: C.txtM, fontStyle: 'italic', alignSelf: 'center' }}>Etapa futura</span>}
                 </div>
               </div>
             );
@@ -558,12 +679,10 @@ function ClientView({ pieces, onPieceClick, calMonth, setCalMonth }) {
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px' }}>
-      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
         <span style={{ fontSize: 14, color: C.txtM }}>👁 Vista del cliente — lo que ve tu cliente ahora</span>
       </div>
 
-      {/* Progress bar */}
       <div style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 12, padding: '16px 18px', marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: C.wh }}>Entrega del mes</span>
@@ -589,7 +708,6 @@ function ClientView({ pieces, onPieceClick, calMonth, setCalMonth }) {
         </div>
       </div>
 
-      {/* Calendar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <button onClick={() => setCalMonth(new Date(year, month - 1, 1))} style={{ background: C.card, border: `1px solid ${C.brd}`, borderRadius: 6, padding: '6px 10px', color: C.txtM, cursor: 'pointer', fontSize: 16 }}>‹</button>
         <span style={{ fontSize: 16, fontWeight: 700, color: C.wh, textTransform: 'capitalize' }}>{monthName}</span>
@@ -637,7 +755,6 @@ function ClientView({ pieces, onPieceClick, calMonth, setCalMonth }) {
         </div>
       </div>
 
-      {/* Upcoming / needs attention list */}
       <div style={{ fontSize: 12, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>Piezas por entregar</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {pieces.filter(p => p.status !== 'publicado' && p.status !== 'pendiente').sort((a, b) => (a.deadline || '').localeCompare(b.deadline || '')).slice(0, 10).map(p => {
@@ -681,9 +798,17 @@ export default function PipelinePage() {
   const [pool, setPool] = useState({});
   const [modal, setModal] = useState(null);
   const [showPool, setShowPool] = useState(true);
-  const [viewMode, setViewMode] = useState('kanban'); // 'kanban' | 'client'
+  const [viewMode, setViewMode] = useState('kanban');
   const [calMonth, setCalMonth] = useState(new Date());
   const [isDemo, setIsDemo] = useState(false);
+  const [draggingId, setDraggingId] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  // Toast helper
+  const showToast = useCallback((msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2500);
+  }, []);
 
   // Auth
   useEffect(() => {
@@ -721,7 +846,6 @@ export default function PipelinePage() {
           if (data?.length) { setPieces(data); return; }
         } catch {}
       }
-      // No pieces yet — show empty, user will generate
       setPieces([]);
     })();
   }, [selClient, selMonth, isDemo]);
@@ -734,7 +858,6 @@ export default function PipelinePage() {
         const { data } = await supabase.from('monthly_team').select('pool_config').eq('client_id', selClient).eq('month', selMonth).single();
         if (data?.pool_config) { setPool(JSON.parse(data.pool_config)); return; }
       } catch {}
-      // Default empty pool
       setPool({});
     })();
   }, [selClient, selMonth]);
@@ -742,12 +865,10 @@ export default function PipelinePage() {
   // Generate pieces with Pepe
   const handleGenerate = useCallback(() => {
     const generated = pepeGeneratePieces(selClient, selMonth, pool);
-    // Keep non-pendiente pieces (already in progress), replace pendiente
     setPieces(prev => {
       const inProgress = prev.filter(p => p.status !== 'pendiente');
       return [...inProgress, ...generated];
     });
-    // Save pool config
     (async () => {
       try {
         await supabase.from('monthly_team').upsert({
@@ -782,6 +903,41 @@ export default function PipelinePage() {
     setPieces(prev => prev.filter(p => p.id !== id));
   }, []);
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // DRAG & DROP — Move piece to any column (founder only)
+  // ═══════════════════════════════════════════════════════════════════════
+  const handleDrop = useCallback(async (pieceId, newStatus) => {
+    const piece = pieces.find(p => p.id === pieceId);
+    if (!piece || piece.status === newStatus) return;
+
+    const oldStatus = piece.status;
+    const updated = { ...piece, status: newStatus };
+
+    // Update local state immediately
+    setPieces(prev => prev.map(p => p.id === pieceId ? updated : p));
+
+    // If modal is open for this piece, update it too
+    setModal(prev => prev && prev.id === pieceId ? updated : prev);
+
+    // Persist to Supabase
+    if (!pieceId.startsWith('gen-') && !pieceId.startsWith('new-')) {
+      try {
+        await supabase.from('content_pieces').update({ status: newStatus }).eq('id', pieceId);
+      } catch {}
+    }
+
+    const fromLabel = STAGE_LABELS[oldStatus] || oldStatus;
+    const toLabel = STAGE_LABELS[newStatus] || newStatus;
+    showToast(`${piece.title} → ${toLabel}`);
+
+    setDraggingId(null);
+  }, [pieces, showToast]);
+
+  // Move from modal
+  const handleMoveToStatus = useCallback(async (pieceId, newStatus) => {
+    handleDrop(pieceId, newStatus);
+  }, [handleDrop]);
+
   if (!session) return null;
 
   const total = pieces.length;
@@ -805,7 +961,6 @@ export default function PipelinePage() {
         }}>
           👥 Pool
         </button>
-        {/* View mode toggle */}
         <div style={{ display: 'flex', background: C.bg, borderRadius: 8, padding: 2, border: `1px solid ${C.brd}` }}>
           <button onClick={() => setViewMode('kanban')} style={{
             padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 11, fontWeight: 600,
@@ -856,7 +1011,6 @@ export default function PipelinePage() {
         )}
 
         {viewMode === 'kanban' ? (
-          /* Kanban */
           <div style={{ flex: 1, display: 'flex', gap: 8, padding: '12px 16px', overflowX: 'auto', alignItems: 'flex-start' }}>
             {pieces.length === 0 ? (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 60, color: C.txtM }}>
@@ -868,12 +1022,21 @@ export default function PipelinePage() {
               </div>
             ) : (
               KANBAN_COLS.map(s => (
-                <Column key={s.k} stage={s} pieces={pieces.filter(p => p.status === s.k)} onCardClick={setModal} team={team} />
+                <Column
+                  key={s.k}
+                  stage={s}
+                  pieces={pieces.filter(p => p.status === s.k)}
+                  onCardClick={setModal}
+                  team={team}
+                  onDragStart={setDraggingId}
+                  draggingId={draggingId}
+                  onDrop={handleDrop}
+                  canDrop={true}
+                />
               ))
             )}
           </div>
         ) : (
-          /* Client View */
           <ClientView
             pieces={pieces}
             onPieceClick={setModal}
@@ -883,7 +1046,38 @@ export default function PipelinePage() {
         )}
       </div>
 
-      {modal && <PieceModal piece={modal} onClose={() => setModal(null)} onUpdate={handleUpdate} onDelete={handleDelete} team={team} />}
+      {modal && (
+        <PieceModal
+          piece={modal}
+          onClose={() => setModal(null)}
+          onUpdate={handleUpdate}
+          onDelete={handleDelete}
+          team={team}
+          onMoveToStatus={handleMoveToStatus}
+        />
+      )}
+
+      {/* Toast notification */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          background: C.card, border: `1px solid ${C.acc}33`, borderRadius: 10,
+          padding: '10px 20px', fontSize: 13, fontWeight: 600, color: C.acc,
+          zIndex: 1100, boxShadow: '0 4px 16px rgba(0,0,0,.4)',
+          animation: 'toastIn .25s ease-out',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span style={{ fontSize: 14 }}>✓</span>
+          {toast}
+        </div>
+      )}
+
+      <style>{`
+        @keyframes toastIn {
+          from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+          to { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }
