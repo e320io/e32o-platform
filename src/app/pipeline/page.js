@@ -98,6 +98,58 @@ function getMonths() {
 }
 function shortName(m) { return (m.display_name || m.username || '').split(' ')[0]; }
 
+// Parse social media URLs to extract embed info
+function getEmbedInfo(url) {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace('www.', '');
+    const path = u.pathname;
+
+    // Instagram post: /p/CODE/ or /p/CODE
+    if (host === 'instagram.com' || host === 'instagr.am') {
+      const postMatch = path.match(/\/p\/([A-Za-z0-9_-]+)/);
+      if (postMatch) return { type: 'instagram', id: postMatch[1], platform: 'Instagram', icon: '📸' };
+      const reelMatch = path.match(/\/reel\/([A-Za-z0-9_-]+)/);
+      if (reelMatch) return { type: 'instagram-reel', id: reelMatch[1], platform: 'Instagram Reel', icon: '🎬' };
+      // Fallback — try as post
+      const segments = path.split('/').filter(Boolean);
+      if (segments.length >= 2) return { type: 'instagram', id: segments[segments.length - 1], platform: 'Instagram', icon: '📸' };
+    }
+
+    // TikTok: /@user/video/ID or /video/ID
+    if (host === 'tiktok.com' || host.endsWith('.tiktok.com')) {
+      const vidMatch = path.match(/\/video\/(\d+)/);
+      if (vidMatch) return { type: 'tiktok', id: vidMatch[1], platform: 'TikTok', icon: '🎵' };
+      // vm.tiktok.com short links — can't embed directly, show as link
+      return { type: 'link', platform: 'TikTok', icon: '🎵' };
+    }
+
+    // YouTube
+    if (host === 'youtube.com' || host === 'youtu.be' || host === 'm.youtube.com') {
+      // Shorts
+      const shortsMatch = path.match(/\/shorts\/([A-Za-z0-9_-]+)/);
+      if (shortsMatch) return { type: 'youtube-short', id: shortsMatch[1], platform: 'YouTube Short', icon: '▶️' };
+      // Regular video
+      if (host === 'youtu.be') {
+        const id = path.slice(1);
+        if (id) return { type: 'youtube', id, platform: 'YouTube', icon: '▶️' };
+      }
+      const vParam = u.searchParams.get('v');
+      if (vParam) return { type: 'youtube', id: vParam, platform: 'YouTube', icon: '▶️' };
+    }
+
+    // Facebook
+    if (host === 'facebook.com' || host === 'fb.com' || host === 'fb.watch') {
+      return { type: 'facebook', platform: 'Facebook', icon: '👤' };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // PEPE: Auto-generate pieces + round-robin assignment
 // ═══════════════════════════════════════════════════════════════════════════
@@ -556,58 +608,135 @@ function PieceModal({ piece, onClose, onUpdate, onDelete, team, onMoveToStatus }
 
             // For publicado tab
             if (sk === 'publicado') {
+              // Detect platform from URL for embed
+              const url = local.publish_url || '';
+              const embedInfo = getEmbedInfo(url);
+
               return (
-                <div style={{ padding: '20px 0' }}>
+                <div style={{ padding: '10px 0' }}>
                   {local.status === 'publicado' ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-                      <div style={{ textAlign: 'center' }}>
-                        <span style={{ fontSize: 40, display: 'block', marginBottom: 8 }}>✦</span>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: C.teal }}>Publicado</div>
+
+                      {/* Embed preview — show first if there's a URL */}
+                      {url && embedInfo && (
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span>{embedInfo.icon}</span> Vista previa — {embedInfo.platform}
+                          </div>
+                          <div style={{
+                            background: '#000', borderRadius: 12, overflow: 'hidden',
+                            border: `1px solid ${C.brd}`, position: 'relative',
+                          }}>
+                            {embedInfo.type === 'instagram' && (
+                              <iframe
+                                src={`https://www.instagram.com/p/${embedInfo.id}/embed/`}
+                                style={{ width: '100%', height: 480, border: 'none', background: '#000' }}
+                                allowTransparency="true"
+                                scrolling="no"
+                                loading="lazy"
+                              />
+                            )}
+                            {embedInfo.type === 'instagram-reel' && (
+                              <iframe
+                                src={`https://www.instagram.com/reel/${embedInfo.id}/embed/`}
+                                style={{ width: '100%', height: 580, border: 'none', background: '#000' }}
+                                allowTransparency="true"
+                                scrolling="no"
+                                loading="lazy"
+                              />
+                            )}
+                            {embedInfo.type === 'tiktok' && (
+                              <iframe
+                                src={`https://www.tiktok.com/embed/v2/${embedInfo.id}`}
+                                style={{ width: '100%', height: 580, border: 'none', background: '#000' }}
+                                allowFullScreen
+                                scrolling="no"
+                                loading="lazy"
+                              />
+                            )}
+                            {embedInfo.type === 'youtube' && (
+                              <iframe
+                                src={`https://www.youtube.com/embed/${embedInfo.id}`}
+                                style={{ width: '100%', aspectRatio: '16/9', border: 'none', background: '#000' }}
+                                allowFullScreen
+                                loading="lazy"
+                              />
+                            )}
+                            {embedInfo.type === 'youtube-short' && (
+                              <iframe
+                                src={`https://www.youtube.com/embed/${embedInfo.id}`}
+                                style={{ width: '100%', height: 580, border: 'none', background: '#000' }}
+                                allowFullScreen
+                                loading="lazy"
+                              />
+                            )}
+                            {embedInfo.type === 'facebook' && (
+                              <iframe
+                                src={`https://www.facebook.com/plugins/post.php?href=${encodeURIComponent(url)}&show_text=false&width=500`}
+                                style={{ width: '100%', height: 500, border: 'none', background: '#000' }}
+                                scrolling="no"
+                                allowFullScreen
+                                loading="lazy"
+                              />
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* No embed — show icon */}
+                      {(!url || !embedInfo) && (
+                        <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                          <span style={{ fontSize: 40, display: 'block', marginBottom: 8 }}>✦</span>
+                          <div style={{ fontSize: 16, fontWeight: 700, color: C.teal }}>Publicado</div>
+                        </div>
+                      )}
+
+                      {/* Date + Link — side by side on desktop */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                        {/* Fecha de publicación */}
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Fecha de publicación</div>
+                          <div style={{ fontSize: 10, color: C.txtM, marginBottom: 6 }}>Aparece en el calendario del cliente</div>
+                          <input
+                            type="date"
+                            value={local.scheduled_date || local.deadline || ''}
+                            onChange={e => {
+                              set('scheduled_date', e.target.value);
+                              set('deadline', e.target.value);
+                            }}
+                            style={{ ...S.inp, colorScheme: 'dark' }}
+                          />
+                        </div>
+
+                        {/* Link */}
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Link de publicación</div>
+                          <div style={{ fontSize: 10, color: C.txtM, marginBottom: 6 }}>Instagram, TikTok, YouTube, Facebook</div>
+                          <input
+                            type="url"
+                            placeholder="https://www.instagram.com/p/..."
+                            value={local.publish_url || ''}
+                            onChange={e => set('publish_url', e.target.value)}
+                            style={S.inp}
+                          />
+                        </div>
                       </div>
 
-                      {/* Fecha de publicación */}
-                      <div>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Fecha de publicación</div>
-                        <div style={{ fontSize: 11, color: C.txtM, marginBottom: 6 }}>Esta fecha aparece en el calendario del cliente</div>
-                        <input
-                          type="date"
-                          value={local.scheduled_date || local.deadline || ''}
-                          onChange={e => {
-                            set('scheduled_date', e.target.value);
-                            set('deadline', e.target.value);
-                          }}
-                          style={{ ...S.inp, maxWidth: 220, colorScheme: 'dark' }}
-                        />
-                      </div>
-
-                      {/* Link de publicación */}
-                      <div>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: C.txtM, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Link de publicación</div>
-                        <div style={{ fontSize: 11, color: C.txtM, marginBottom: 6 }}>Instagram, TikTok, YouTube, etc.</div>
-                        <input
-                          type="url"
-                          placeholder="https://www.instagram.com/p/..."
-                          value={local.publish_url || ''}
-                          onChange={e => set('publish_url', e.target.value)}
-                          style={S.inp}
-                        />
+                      {/* Actions */}
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <button onClick={handleSave} style={S.btn(true)}>
+                          {saving ? 'Guardando…' : '💾 Guardar'}
+                        </button>
                         {local.publish_url && (
                           <a href={local.publish_url} target="_blank" rel="noopener noreferrer" style={{
                             display: 'inline-flex', alignItems: 'center', gap: 6,
                             fontSize: 12, color: C.acc, textDecoration: 'none',
-                            padding: '6px 12px', background: C.accDim, borderRadius: 6,
-                            marginTop: 8,
+                            padding: '8px 16px', background: C.accDim, borderRadius: 8,
+                            fontWeight: 600, fontFamily: 'inherit',
                           }}>
-                            ↗ Abrir publicación
+                            ↗ Abrir en {embedInfo?.platform || 'navegador'}
                           </a>
                         )}
-                      </div>
-
-                      {/* Guardar */}
-                      <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                        <button onClick={handleSave} style={S.btn(true)}>
-                          {saving ? 'Guardando…' : '💾 Guardar'}
-                        </button>
                       </div>
                     </div>
                   ) : (
